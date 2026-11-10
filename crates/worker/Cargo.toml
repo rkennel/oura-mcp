@@ -1,0 +1,17 @@
+[package]
+name = "oura-mcp-worker"
+description = "Cloudflare Workers adapter for the Oura MCP server."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+oura-mcp-core = { path = "../core" }
+worker = { version = "0.8" }
+worker-macros = { version = "0.8" }
+
+[lints]
+workspace = true
