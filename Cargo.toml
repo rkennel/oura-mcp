@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/worker"]
+members = ["crates/core", "crates/worker", "crates/e2e"]
+# Plain `cargo test` covers the natively testable crate only. The worker
+# builds for WebAssembly and the e2e tests need a running Worker.
+default-members = ["crates/core"]
 
 [workspace.package]
 version = "0.1.0"

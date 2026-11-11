@@ -1,0 +1,12 @@
+[package]
+name = "oura-mcp-e2e"
+description = "End-to-end tests that drive the Worker over HTTP, as a client would."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dev-dependencies]
+ureq = "2"
+
+[lints]
+workspace = true
