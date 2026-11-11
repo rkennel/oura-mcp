@@ -37,9 +37,13 @@ To run the Worker by hand:
 
 ```sh
 cd crates/worker
+npm ci                               # installs the pinned wrangler version
 npx wrangler dev                     # http://localhost:8787
 curl http://localhost:8787/health
 ```
+
+`wrangler` is pinned in `crates/worker/package.json`, so local runs, the
+end-to-end container and deploys all use the same version.
 
 ## Testing approach
 

@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = ["crates/core", "crates/worker", "crates/e2e"]
 # Plain `cargo test` covers the natively testable crate only. The worker
 # builds for WebAssembly and the e2e tests need a running Worker.
@@ -7,7 +7,7 @@ default-members = ["crates/core"]
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 publish = false
 
 [workspace.lints.rust]
@@ -17,7 +17,9 @@ unsafe_code = "forbid"
 all = { level = "deny", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 
-# Size-focused settings recommended by Cloudflare for Rust Workers.
+# Small WebAssembly binaries matter because Workers limit bundle size. lto,
+# strip and codegen-units follow Cloudflare's guidance for Rust Workers;
+# opt-level = "s" (optimise for size) is this project's own addition.
 [profile.release]
 lto = true
 strip = true

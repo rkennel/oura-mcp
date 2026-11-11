@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Runs the three CI stages in order, stopping at the first failure, exactly
-# as GitHub Actions does on a pull request.
+# Runs the three CI stages in order, stopping at the first failure, using the
+# same scripts GitHub Actions runs. Tool versions on this machine may differ
+# from the CI runner's.
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 

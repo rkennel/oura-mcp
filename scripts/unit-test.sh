@@ -10,6 +10,6 @@ require_command cargo "https://rustup.rs"
 require_cargo_subcommand llvm-cov cargo-llvm-cov
 
 step "Unit tests (line coverage gate: ${COVERAGE_MIN}%)"
-cargo llvm-cov -p oura-mcp-core --fail-under-lines "$COVERAGE_MIN"
+cargo llvm-cov -p oura-mcp-core --locked --fail-under-lines "$COVERAGE_MIN"
 
 step "Unit tests passed"

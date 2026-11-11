@@ -2,28 +2,23 @@
 
 mod support;
 
-use support::base_url;
+use support::get;
 
 #[test]
 fn health_endpoint_reports_the_server_is_running() {
-    let body = ureq::get(&format!("{}/health", base_url()))
-        .call()
-        .expect("health request should succeed")
-        .into_string()
-        .expect("health body should be text");
+    let response = get("/health");
 
+    assert_eq!(response.status, 200);
     assert!(
-        body.starts_with("oura-mcp ") && body.ends_with(" is running"),
-        "unexpected health body: {body}"
+        response.body.starts_with("oura-mcp ") && response.body.ends_with(" is running"),
+        "unexpected health body: {}",
+        response.body
     );
 }
 
 #[test]
 fn unknown_path_is_not_found() {
-    let result = ureq::get(&format!("{}/no-such-path", base_url())).call();
+    let response = get("/no-such-path");
 
-    match result {
-        Err(ureq::Error::Status(status, _)) => assert_eq!(status, 404),
-        other => panic!("expected 404, got {other:?}"),
-    }
+    assert_eq!(response.status, 404);
 }

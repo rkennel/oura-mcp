@@ -5,6 +5,8 @@
 yanked = "deny"
 
 [licenses]
+# Test-only dependencies are skipped by default; audit them too.
+include-dev = true
 # Explicit allowlist: a dependency with any other licence fails the check
 # and has to be added here deliberately.
 allow = [

@@ -6,7 +6,8 @@ services:
       context: ..
       dockerfile: e2e/Dockerfile
     ports:
-      - "8787:8787"
+      # Loopback only, so the Worker is not reachable from the local network.
+      - "127.0.0.1:8787:8787"
     healthcheck:
       test:
         - CMD

@@ -1,12 +1,14 @@
-# Runs the Worker exactly as built for production, inside workerd (the
-# open-source Cloudflare Workers runtime), for end-to-end tests.
-# Build context is the repository root.
+# Serves the production build artifact of the Worker inside workerd (the
+# open-source Cloudflare Workers runtime) for end-to-end tests. This is a
+# local simulation: storage, secrets and Cloudflare Access are emulated or
+# absent. Build context is the repository root.
 
 FROM rust:1-slim AS build
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
-RUN cargo install -q "worker-build@^0.8"
+# Same version as the [build] command in crates/worker/wrangler.toml.
+RUN cargo install -q --locked "worker-build@0.8.7"
 WORKDIR /app
 COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
 COPY crates ./crates
@@ -20,10 +22,12 @@ FROM node:22-slim
 ENV CI=true WRANGLER_SEND_METRICS=false
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && npm install -g wrangler@4
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /worker
+# wrangler comes from the lock file, so tests and deploys use one version.
+COPY crates/worker/package.json crates/worker/package-lock.json ./
+RUN npm ci
 COPY --from=build /app/crates/worker/build ./build
 COPY --from=build /app/crates/worker/wrangler.e2e.toml ./wrangler.toml
 EXPOSE 8787
-CMD ["wrangler", "dev", "--ip", "0.0.0.0", "--port", "8787"]
+CMD ["npx", "wrangler", "dev", "--ip", "0.0.0.0", "--port", "8787"]

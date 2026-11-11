@@ -1,0 +1,8 @@
+{
+  "name": "oura-mcp-worker",
+  "private": true,
+  "description": "Pins the wrangler version used for local runs, end-to-end tests and deploys.",
+  "devDependencies": {
+    "wrangler": "4.160.0"
+  }
+}
