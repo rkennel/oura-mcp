@@ -21,14 +21,17 @@ compiled to WebAssembly, and deployed on Cloudflare Workers.
 
 ## Common commands
 
+CI and local runs use the same scripts, so a local pass predicts a CI pass.
+
 | Command | What it does |
 |---|---|
-| `make lint` | `rustfmt` check and `clippy` with warnings as errors |
-| `make audit` | Dependency advisories, licences and sources (`cargo-deny`) |
-| `make test` | Unit tests for `crates/core` |
-| `make coverage` | Unit tests, failing below 85% line coverage |
-| `make e2e` | Builds the Worker into a container, runs it in the Workers runtime, and runs `crates/e2e` against it |
-| `make ci` | All of the above, in the order CI runs them |
+| `scripts/static-analysis.sh` | `rustfmt` check, `clippy` with warnings as errors, and `cargo-deny` |
+| `scripts/unit-test.sh` | Unit tests for `crates/core`, failing below 85% line coverage |
+| `scripts/e2e-test.sh` | Builds the Worker into a container, runs it in the Workers runtime, and runs `crates/e2e` against it |
+| `scripts/local-ci.sh` | All three in order, stopping at the first failure |
+
+Set `KEEP_E2E_UP=1` to leave the end-to-end container running after the
+tests, for debugging.
 
 To run the Worker by hand:
 

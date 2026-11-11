@@ -1,5 +1,5 @@
 # cargo-deny: checks dependencies for known vulnerabilities, unexpected
-# licences and untrusted sources. Run with `make audit`.
+# licences and untrusted sources. Run with `scripts/static-analysis.sh`.
 
 [advisories]
 yanked = "deny"
