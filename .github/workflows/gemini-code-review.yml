@@ -1,8 +1,19 @@
 name: Google Gemini CLI Code Review
 on:
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Number of the pull request to review'
+        required: true
+        type: string
   pull_request:
     types: [opened, synchronize, reopened]
+
+# A new push to the same pull request cancels the review still running for
+# the previous push, so reviews do not stack up.
+concurrency:
+  group: gemini-review-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
 
 jobs:
   review:
@@ -10,21 +21,21 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      issues: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-        
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
       - name: Run Gemini PR Review
-        uses: google-github-actions/run-gemini-cli@v0
+        uses: google-github-actions/run-gemini-cli@f77273f4c914e4bf38440cf36a0369cb64a37489 # v0.1.22
         env:
           GEMINI_CLI_TRUST_WORKSPACE: 'true'
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           gemini_api_key: '${{ secrets.GEMINI_API_KEY }}'
+          # Optional repository variable; empty means the CLI's default model.
+          gemini_model: '${{ vars.GEMINI_MODEL }}'
           workflow_name: 'gemini-review'
-          github_pr_number: '${{ github.event.pull_request.number }}'
+          github_pr_number: '${{ github.event.pull_request.number || inputs.pr_number }}'
           # Settings, extension and prompt below follow Google's pr-review example:
           # https://github.com/google-github-actions/run-gemini-cli/tree/main/examples/workflows/pr-review
           settings: |-
