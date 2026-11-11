@@ -1,0 +1,9 @@
+# CI-only override: stores image layers in the GitHub Actions cache so the
+# end-to-end stage does not rebuild the toolchain layers on every run.
+services:
+  worker:
+    build:
+      cache_from:
+        - type=gha,scope=e2e-worker
+      cache_to:
+        - type=gha,scope=e2e-worker,mode=max

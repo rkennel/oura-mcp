@@ -1,0 +1,19 @@
+# Production-representative environment for end-to-end tests.
+# Fakes for external systems (such as the Oura API) are added here as services.
+services:
+  worker:
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile
+    ports:
+      # Loopback only, so the Worker is not reachable from the local network.
+      - "127.0.0.1:8787:8787"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://localhost:8787/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 2s
+      timeout: 5s
+      retries: 30
