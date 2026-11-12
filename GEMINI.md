@@ -1,38 +1,38 @@
 # Review guidance for Gemini
 
-This repository is an MCP server that exposes Oura sleep data, written in
-Rust and deployed on Cloudflare Workers (WebAssembly). Review pull requests
-against the standards below. Report only verifiable problems; do not restate
-what the code does.
+This repository is an MCP server that exposes Oura sleep data to Claude. It
+is written in Go and deployed as a container on Google Cloud Run. Review
+pull requests against the standards below. Report only verifiable problems;
+do not restate what the code does.
 
 ## Engineering standards
 
-- **Test-driven.** New behaviour arrives with tests. Flag logic in
-  `crates/core` that has no unit test.
+- **Test-driven.** New behaviour arrives with tests. Flag logic under
+  `internal/` that has no unit test.
 - **Unit tests isolate one unit.** A unit test exercises a single function or
-  method, with collaborators replaced by fakes injected through traits. Flag
-  unit tests that reach the network, the clock or other modules' real logic.
-- **Coverage.** `crates/core` must stay at or above 85% line coverage.
-- **End-to-end tests are production-representative.** They live in
-  `crates/e2e`, drive the real Worker build inside a container, and may use
-  fakes only for external systems such as the Oura API.
+  method, with collaborators replaced by fakes injected through interfaces.
+  Flag unit tests that reach the real network or other packages' real logic.
+- **Coverage.** `internal/` must stay at or above 85% statement coverage.
+- **End-to-end tests are production-representative.** They live in `e2e/`,
+  drive the production container image, and may use fakes only for external
+  systems such as the Oura API.
 - **Clean Code.** Small functions with one responsibility, intention-revealing
   names, no dead code, no duplicated logic, comments that explain why rather
   than what.
-- **Idiomatic Rust.** Follow the Rust API Guidelines and clippy's advice:
-  `Result` and `?` over panics, no `unwrap`/`expect` outside tests, borrow
-  rather than clone where practical, no `unsafe`.
+- **Idiomatic Go.** Follow Effective Go and the Go Proverbs: errors are
+  values and are wrapped with context, no panics for expected failures,
+  accept interfaces and return concrete types, small interfaces defined by
+  the consumer, `context.Context` as the first parameter of anything that
+  does I/O.
 
 ## Architecture rules
 
-- `crates/core` is platform-independent: no Cloudflare or WebAssembly
-  dependencies. Flag any that appear.
-- `crates/worker` is a thin adapter. Flag business logic that belongs in
-  `crates/core`.
+- `cmd/` contains only process wiring. Flag logic that belongs in `internal/`.
+- Configuration is read from the environment in one place (`internal/app`).
 
 ## Security
 
-- This service handles personal health data and OAuth tokens. Flag secrets or
-  tokens that are logged, returned in responses, or committed.
-- Flag any endpoint that returns Oura data without checking the caller's
-  identity.
+- This service handles personal health data, an API key and OAuth tokens.
+  Flag secrets or tokens that are logged, returned in responses, or committed.
+- Flag any endpoint other than `/health` that is reachable without the API key.
+- Flag secret comparisons that are not constant-time.

@@ -1,23 +1,22 @@
 #!/usr/bin/env bash
-# Stage 1 of CI: formatting, lints (warnings are errors) and dependency audit.
+# Stage 1 of CI: formatting, vet and module tidiness.
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-require_command cargo "https://rustup.rs"
-require_cargo_subcommand deny cargo-deny
+require_command go "https://go.dev/doc/install"
 
-step "Formatting (rustfmt)"
-cargo fmt --all --check
+step "Formatting (gofmt)"
+unformatted="$(gofmt -l .)"
+if [ -n "$unformatted" ]; then
+    printf 'These files need gofmt:\n%s\n' "$unformatted" >&2
+    exit 1
+fi
 
-# Every crate except the Worker builds natively, so new crates are linted
-# without editing this script.
-step "Lints for native crates (clippy)"
-cargo clippy --workspace --exclude oura-mcp-worker --all-targets --locked -- -D warnings
+# The e2e tag includes the end-to-end tests, which are otherwise not compiled.
+step "Suspicious constructs (go vet)"
+go vet -tags e2e ./...
 
-step "Lints for the Worker, built for WebAssembly (clippy)"
-cargo clippy -p oura-mcp-worker --target wasm32-unknown-unknown --locked -- -D warnings
-
-step "Dependency advisories, licences and sources (cargo-deny)"
-cargo deny check
+step "go.mod and go.sum are tidy"
+go mod tidy -diff
 
 step "Static analysis passed"

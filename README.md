@@ -1,23 +1,23 @@
 # oura-mcp
 
-A private MCP server that exposes Oura sleep data to Claude. Written in Rust,
-compiled to WebAssembly, and deployed on Cloudflare Workers.
+A private MCP server that exposes Oura sleep data to Claude. Written in Go
+and deployed as a container on Google Cloud Run.
 
 ## Layout
 
 | Path | Purpose |
 |---|---|
-| `crates/core` | Platform-independent logic. Plain Rust, unit tested natively. |
-| `crates/worker` | Thin Cloudflare Workers adapter around `core`. |
-| `crates/e2e` | End-to-end tests that call the running Worker over HTTP. |
-| `e2e/` | Container setup for the end-to-end environment. |
+| `cmd/server` | The executable. Process wiring only. |
+| `internal/app` | Configuration and server lifecycle. |
+| `internal/httpapi` | HTTP routes and handlers. |
+| `e2e/` | End-to-end tests and their Docker Compose environment. |
+| `scripts/` | The CI stages, runnable locally. |
+| `Dockerfile` | The production image. |
 
 ## Prerequisites
 
-- Rust (the pinned toolchain in `rust-toolchain.toml` installs itself via `rustup`)
-- Node.js and npm (for `wrangler`)
-- Docker (for end-to-end tests)
-- `cargo install cargo-llvm-cov cargo-deny` (coverage and dependency audit)
+- Go (the version in `go.mod`; newer `go` commands download it automatically)
+- Docker with the Compose plugin (for end-to-end tests)
 
 ## Common commands
 
@@ -25,33 +25,30 @@ CI and local runs use the same scripts, so a local pass predicts a CI pass.
 
 | Command | What it does |
 |---|---|
-| `scripts/static-analysis.sh` | `rustfmt` check, `clippy` with warnings as errors, and `cargo-deny` |
-| `scripts/unit-test.sh` | Unit tests for `crates/core`, failing below 85% line coverage |
-| `scripts/e2e-test.sh` | Builds the Worker into a container, runs it in the Workers runtime, and runs `crates/e2e` against it |
+| `scripts/static-analysis.sh` | `gofmt` check, `go vet`, and a `go.mod` tidiness check |
+| `scripts/unit-test.sh` | Unit tests with the race detector, failing below 85% coverage |
+| `scripts/e2e-test.sh` | Builds the production image, runs it, and runs the end-to-end tests against it |
 | `scripts/local-ci.sh` | All three in order, stopping at the first failure |
 
 Set `KEEP_E2E_UP=1` to leave the end-to-end container running after the
 tests, for debugging.
 
-To run the Worker by hand:
+To run the server by hand:
 
 ```sh
-cd crates/worker
-npm ci                               # installs the pinned wrangler version
-npx wrangler dev                     # http://localhost:8787
-curl http://localhost:8787/health
+go run ./cmd/server                  # http://localhost:8080
+curl http://localhost:8080/health
 ```
 
-`wrangler` is pinned in `crates/worker/package.json`, so local runs, the
-end-to-end container and deploys all use the same version.
+Set `PORT` to listen elsewhere.
 
 ## Testing approach
 
-- **Unit tests** live beside the code in `crates/core` and test one unit in
-  isolation. The 85% coverage gate applies to this crate.
-- **End-to-end tests** live in `crates/e2e` and drive the real Worker build
-  over HTTP inside a container. `crates/worker` is deliberately thin and is
-  covered here rather than by unit tests.
+- **Unit tests** sit beside the code as `_test.go` files and test one unit in
+  isolation. The 85% coverage gate applies to `internal/`.
+- **End-to-end tests** live in `e2e/` behind the `e2e` build tag and drive the
+  production container image over HTTP. `cmd/server` is a few lines of wiring
+  and is covered here rather than by unit tests.
 
 ## Continuous integration
 
@@ -60,5 +57,5 @@ static analysis, unit tests with the coverage gate, then end-to-end tests.
 
 ## Status
 
-Scaffold only: the Worker answers `GET /health`. MCP tools, Oura access and
-authentication arrive in later pull requests.
+Skeleton only: the server answers `GET /health`. Authentication, MCP tools
+and Oura access arrive in later pull requests; see the repository's issues.

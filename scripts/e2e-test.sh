@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Stage 3 of CI: build the Worker into a container, run it in the Workers
-# runtime, and run the end-to-end tests against it. The container is always
-# stopped afterwards; set KEEP_E2E_UP=1 to leave it running for debugging.
+# Stage 3 of CI: build the production image, run it, and run the end-to-end
+# tests against it. The container is always stopped afterwards; set
+# KEEP_E2E_UP=1 to leave it running for debugging.
 # COMPOSE_FILE may add override files; CI uses it to enable layer caching.
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -9,7 +9,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 export COMPOSE_FILE="${COMPOSE_FILE:-e2e/compose.yaml}"
 COMPOSE=(docker compose)
 
-require_command cargo "https://rustup.rs"
+require_command go "https://go.dev/doc/install"
 require_command docker "https://docs.docker.com/get-docker/"
 
 finish() {
@@ -27,9 +27,11 @@ finish() {
 trap finish EXIT
 
 step "Building and starting the end-to-end environment"
-"${COMPOSE[@]}" up --build --detach --wait
+"${COMPOSE[@]}" up --build --detach
 
+# -count=1 disables the test cache: these tests depend on a running server,
+# which Go cannot see has changed.
 step "End-to-end tests"
-cargo test -p oura-mcp-e2e --locked
+go test -tags e2e -count=1 ./e2e/...
 
 step "End-to-end tests passed"
