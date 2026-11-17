@@ -24,33 +24,63 @@ const (
 	shutdownTimeout = 8 * time.Second
 )
 
+// listenFunc opens the listener the server accepts connections on.
+// Production code passes net.Listen.
+type listenFunc func(network, address string) (net.Listener, error)
+
+// serveFunc serves on listener until ctx is cancelled. Production code passes
+// Serve.
+type serveFunc func(ctx context.Context, listener net.Listener, logger *slog.Logger) error
+
+// httpServer is the part of *http.Server that the serving lifecycle drives.
+type httpServer interface {
+	Serve(listener net.Listener) error
+	Shutdown(ctx context.Context) error
+}
+
 // Run loads configuration, listens on the configured address and serves
 // until ctx is cancelled.
 func Run(ctx context.Context, getenv func(string) string, logger *slog.Logger) error {
+	return run(ctx, getenv, logger, net.Listen, Serve)
+}
+
+// run is Run with its network collaborators injected, so that unit tests
+// can replace them.
+func run(ctx context.Context, getenv func(string) string, logger *slog.Logger, listen listenFunc, serve serveFunc) error {
 	config, err := LoadConfig(getenv)
 	if err != nil {
 		return err
 	}
 
-	listener, err := net.Listen("tcp", config.Addr)
+	listener, err := listen("tcp", config.Addr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", config.Addr, err)
 	}
 
-	return Serve(ctx, listener, logger)
+	return serve(ctx, listener, logger)
 }
 
 // Serve handles requests on listener until ctx is cancelled, then shuts
 // down gracefully. It returns nil after a clean shutdown.
 func Serve(ctx context.Context, listener net.Listener, logger *slog.Logger) error {
-	server := &http.Server{
+	return serveUntilCancelled(ctx, newServer(), listener, logger)
+}
+
+// newServer returns the HTTP server with the routes and timeouts the
+// service runs with.
+func newServer() *http.Server {
+	return &http.Server{
 		Handler:           httpapi.NewHandler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,
 		IdleTimeout:       idleTimeout,
 	}
+}
 
+// serveUntilCancelled runs server on listener until ctx is cancelled or
+// serving fails, then shuts the server down gracefully.
+func serveUntilCancelled(ctx context.Context, server httpServer, listener net.Listener, logger *slog.Logger) error {
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
 	logger.Info("server listening", "addr", listener.Addr().String())
