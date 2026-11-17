@@ -1,6 +1,0 @@
-name = "oura-mcp"
-main = "build/index.js"
-compatibility_date = "2026-11-10"
-
-[build]
-command = "cargo install -q \"worker-build@0.8.7\" && worker-build --release"

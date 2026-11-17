@@ -1,9 +1,0 @@
-[package]
-name = "oura-mcp-core"
-description = "Platform-independent logic for the Oura MCP server."
-version.workspace = true
-edition.workspace = true
-publish.workspace = true
-
-[lints]
-workspace = true
