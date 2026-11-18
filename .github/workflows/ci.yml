@@ -24,6 +24,9 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          # The script pins the linter versions, so a version bump there
+          # starts a fresh cache of their modules and builds.
+          cache-dependency-path: scripts/static-analysis.sh
       - run: scripts/static-analysis.sh
 
   unit-tests:
