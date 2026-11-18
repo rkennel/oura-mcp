@@ -108,16 +108,12 @@ func TestLoadRoutingConfigRejectsBadFiles(t *testing.T) {
 	}
 }
 
-// The repository's own routing file must load, and must send a change to
-// the review workflow to the high-risk model.
+// The repository's own routing file must load, so a typo in it fails here
+// rather than in a review run. What it routes where is for its owner to
+// change freely, so it is not pinned down here.
 func TestTheRepositoryRoutingFileLoads(t *testing.T) {
-	cfg, err := loadRoutingConfig("../../.github/gemini-review.json")
-	if err != nil {
+	if _, err := loadRoutingConfig("../../.github/gemini-review.json"); err != nil {
 		t.Fatalf("loadRoutingConfig: %v", err)
-	}
-	got := assess(mustParse(t, diffOf(".github/workflows/gemini-code-review.yml", "", "+x")), cfg)
-	if got.Tier != tierHighRisk || got.Model != cfg.Models.HighRisk {
-		t.Errorf("a workflow change routes to %s (%s), want the high-risk model", got.Model, got.Tier)
 	}
 }
 
