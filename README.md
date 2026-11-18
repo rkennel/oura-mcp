@@ -12,6 +12,7 @@ and deployed as a container on Google Cloud Run.
 | `internal/httpapi` | HTTP routes and handlers. |
 | `e2e/` | End-to-end tests and their Docker Compose environment. |
 | `scripts/` | The CI stages, runnable locally. |
+| `tools/gemini-review` | Fetches a pull request for the Gemini review and posts Gemini's reply. Its own Go module. |
 | `Dockerfile` | The production image. |
 
 ## Prerequisites
@@ -62,6 +63,20 @@ Versions are pinned so a run today matches a run next month: the Go
 toolchain in `go.mod`, the linters in `scripts/static-analysis.sh`, the base
 images in `Dockerfile` by digest, and third-party actions by commit SHA. Lint
 rules live in `.golangci.yml`.
+
+## Code review by Gemini
+
+`.github/workflows/gemini-code-review.yml` reviews every push to a pull
+request with Gemini CLI and posts the result as a review by
+`github-actions[bot]`, with line comments where it finds problems and a
+"No issues found." review when it finds none. Gemini reads the pull request
+and the repository with read-only tools and gets no GitHub token;
+`tools/gemini-review` does the GitHub calls. A failed run means no review
+was posted. Gemini's raw output is kept as the run's `gemini-output`
+artifact. The review standards are in `GEMINI.md`.
+
+To review a pull request again by hand, run the workflow from the Actions
+tab with its number.
 
 ## Status
 
