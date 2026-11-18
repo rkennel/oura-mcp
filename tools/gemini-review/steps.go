@@ -109,7 +109,7 @@ func writeRouting(dir string, r routing) error {
 	if err != nil {
 		return fmt.Errorf("encode the routing: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, routingFile), raw, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, routingFile), raw, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", routingFile, err)
 	}
 	return nil
@@ -133,13 +133,14 @@ func appendFile(name, text string) error {
 	if name == "" {
 		return nil
 	}
-	file, err := os.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	file, err := os.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", name, err)
 	}
-	if _, err := io.WriteString(file, text); err != nil {
-		file.Close()
+	_, writeErr := io.WriteString(file, text)
+	closeErr := file.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
 		return fmt.Errorf("write %s: %w", name, err)
 	}
-	return file.Close()
+	return nil
 }
