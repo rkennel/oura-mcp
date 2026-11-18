@@ -15,8 +15,9 @@ const (
 
 // fileDiff is the part of a unified diff that changes one file.
 type fileDiff struct {
-	path  string
-	hunks []hunk
+	path    string
+	oldPath string // the base version's path; empty for a new file
+	hunks   []hunk
 }
 
 type hunk struct {
@@ -72,6 +73,12 @@ func parseDiff(raw string) ([]fileDiff, error) {
 			// line that starts with "++".
 			if path, ok := strings.CutPrefix(line, "+++ b/"); ok {
 				current.path = path
+			}
+			if path, ok := strings.CutPrefix(line, "--- a/"); ok {
+				current.oldPath = path
+			}
+			if path, ok := strings.CutPrefix(line, "rename from "); ok {
+				current.oldPath = path
 			}
 			continue
 		}

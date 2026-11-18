@@ -93,6 +93,53 @@ func prepared(t *testing.T, fake *fakeGitHub) string {
 	return dir
 }
 
+// readyToPost prepares a pull request, routes it to testModel, and writes
+// Gemini CLI output showing that testModel answered. It returns the review
+// directory and the environment post needs besides the reply.
+func readyToPost(t *testing.T, fake *fakeGitHub) (string, map[string]string) {
+	t.Helper()
+	dir := prepared(t, fake)
+	decision := routing{ChangedLines: 6, Threshold: 400, Tier: tierStandard, Model: testModel}
+	if err := writeRouting(dir, decision); err != nil {
+		t.Fatal(err)
+	}
+	return dir, map[string]string{
+		"GEMINI_OUTPUT":       cliOutputFile(t, map[string][2]int{testModel: {3, 0}}),
+		"GITHUB_STEP_SUMMARY": filepath.Join(t.TempDir(), "summary.md"),
+	}
+}
+
+const testModel = "gemini-test-flash"
+
+// cliOutputFile writes Gemini CLI JSON output whose statistics show each
+// model's requests and errors.
+func cliOutputFile(t *testing.T, models map[string][2]int) string {
+	t.Helper()
+	stats := map[string]any{}
+	for name, counts := range models {
+		stats[name] = map[string]any{"api": map[string]int{"totalRequests": counts[0], "totalErrors": counts[1]}}
+	}
+	raw, err := json.Marshal(map[string]any{"response": "{}", "stats": map[string]any{"models": stats}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := filepath.Join(t.TempDir(), "stdout.log")
+	if err := os.WriteFile(name, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return name
+}
+
+func with(env map[string]string, key, value string) map[string]string {
+	merged := map[string]string{key: value}
+	for k, v := range env {
+		if k != key {
+			merged[k] = v
+		}
+	}
+	return merged
+}
+
 func TestPrepareWritesThePullRequestForGemini(t *testing.T) {
 	dir := prepared(t, &fakeGitHub{})
 
@@ -121,10 +168,10 @@ func TestPrepareWritesThePullRequestForGemini(t *testing.T) {
 
 func TestPostPostsLineCommentsOnTheHeadCommit(t *testing.T) {
 	fake := &fakeGitHub{}
-	dir := prepared(t, fake)
+	dir, env := readyToPost(t, fake)
 	reply := `{"summary": "One issue.", "comments": [{"path": "internal/app/config.go", "line": 12, "side": "RIGHT", "severity": "low", "body": "Comment says what, not why."}]}`
 
-	out, err := runTool(t, fake, dir, map[string]string{"GEMINI_REPLY": reply}, "post")
+	out, err := runTool(t, fake, dir, with(env, "GEMINI_REPLY", reply), "post")
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
@@ -136,17 +183,44 @@ func TestPostPostsLineCommentsOnTheHeadCommit(t *testing.T) {
 	if got.CommitID != "0123456789abcdef" || got.Event != "COMMENT" || len(got.Comments) != 1 || got.Comments[0].Line != 12 {
 		t.Errorf("review = %+v", got)
 	}
-	if !strings.Contains(out, "1 line comments") || !strings.Contains(out, "pullrequestreview-1") {
+	if !strings.Contains(out, "1 line comments") || !strings.Contains(out, "pullrequestreview-1") || !strings.Contains(out, testModel) {
 		t.Errorf("output = %q", out)
+	}
+	if !strings.Contains(got.Body, "Reviewed by `"+testModel+"` (standard tier)") {
+		t.Errorf("review body does not say which model reviewed:\n%s", got.Body)
+	}
+	if summary, _ := os.ReadFile(env["GITHUB_STEP_SUMMARY"]); !strings.Contains(string(summary), "Reviewed by `"+testModel+"`") {
+		t.Errorf("job summary = %q, want the model", summary)
+	}
+}
+
+func TestPostFailsWhenTheRoutedModelDidNotAnswer(t *testing.T) {
+	for name, output := range map[string]map[string][2]int{
+		"another model answered": {"gemini-fallback": {2, 0}},
+		"every request failed":   {testModel: {2, 2}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fake := &fakeGitHub{}
+			dir, env := readyToPost(t, fake)
+			env = with(env, "GEMINI_OUTPUT", cliOutputFile(t, output))
+
+			_, err := runTool(t, fake, dir, with(env, "GEMINI_REPLY", `{"summary": "Fine."}`), "post")
+			if err == nil || !strings.Contains(err.Error(), "did not answer") {
+				t.Errorf("err = %v, want the routed model reported missing", err)
+			}
+			if len(fake.reviews) != 0 {
+				t.Errorf("posted %d reviews naming a model that did not run", len(fake.reviews))
+			}
+		})
 	}
 }
 
 func TestPostFallsBackToTheBodyWhenGitHubRejectsTheLines(t *testing.T) {
 	fake := &fakeGitHub{rejectLineCount: 1}
-	dir := prepared(t, fake)
+	dir, env := readyToPost(t, fake)
 	reply := `{"summary": "One issue.", "comments": [{"path": "internal/app/config.go", "line": 12, "body": "Problem."}]}`
 
-	out, err := runTool(t, fake, dir, map[string]string{"GEMINI_REPLY": reply}, "post")
+	out, err := runTool(t, fake, dir, with(env, "GEMINI_REPLY", reply), "post")
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
@@ -170,8 +244,8 @@ func TestPostFailsWhenNoReviewCanBePosted(t *testing.T) {
 		"fallback rejected": {&fakeGitHub{failStatus: http.StatusUnprocessableEntity}, `{"summary": "x", "comments": [{"path": "internal/app/config.go", "line": 12, "body": "b"}]}`},
 	} {
 		t.Run(name, func(t *testing.T) {
-			dir := prepared(t, tc.fake)
-			if _, err := runTool(t, tc.fake, dir, map[string]string{"GEMINI_REPLY": tc.reply}, "post"); err == nil {
+			dir, env := readyToPost(t, tc.fake)
+			if _, err := runTool(t, tc.fake, dir, with(env, "GEMINI_REPLY", tc.reply), "post"); err == nil {
 				t.Error("post succeeded")
 			}
 		})
@@ -203,6 +277,7 @@ func TestRunRejectsBadArgumentsAndSettings(t *testing.T) {
 		"missing token":   {[]string{"prepare"}, map[string]string{"GITHUB_TOKEN": ""}},
 		"bad PR number":   {[]string{"prepare"}, map[string]string{"PR_NUMBER": "7; rm -rf /"}},
 		"zero PR number":  {[]string{"prepare"}, map[string]string{"PR_NUMBER": "0"}},
+		"route, no dir":   {[]string{"route"}, map[string]string{"REVIEW_DIR": ""}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := runTool(t, &fakeGitHub{}, t.TempDir(), tc.extra, tc.args...); err == nil {

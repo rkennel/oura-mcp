@@ -56,7 +56,7 @@ func TestBuildReviewPlacesCommentsOnTheDiffAndMovesTheRestToTheBody(t *testing.T
 		},
 	}
 
-	got := buildReview(review, "0123456789abcdef", onDiff)
+	got := buildReview(review, "0123456789abcdef", "Reviewed by `m` because x.", onDiff)
 
 	if got.CommitID != "0123456789abcdef" || got.Event != "COMMENT" {
 		t.Errorf("commit and event = %q, %q", got.CommitID, got.Event)
@@ -77,7 +77,7 @@ func TestBuildReviewPlacesCommentsOnTheDiffAndMovesTheRestToTheBody(t *testing.T
 		"One bug, one nit.",
 		"### Comments outside the diff",
 		"- `a.go` line 40: **[LOW]** Outside the diff.",
-		"Gemini CLI review of 0123456.",
+		"Reviewed by `m` because x.\n\n<sub>Gemini CLI review of 0123456.",
 	} {
 		if !strings.Contains(got.Body, part) {
 			t.Errorf("body lacks %q:\n%s", part, got.Body)
@@ -89,7 +89,7 @@ func TestBuildReviewPlacesCommentsOnTheDiffAndMovesTheRestToTheBody(t *testing.T
 }
 
 func TestBuildReviewWithNoCommentsSaysNothingWasFound(t *testing.T) {
-	got := buildReview(geminiReview{Summary: "A clean refactor."}, "abc", nil)
+	got := buildReview(geminiReview{Summary: "A clean refactor."}, "abc", "", nil)
 
 	if len(got.Comments) != 0 {
 		t.Errorf("comments = %+v, want none", got.Comments)
@@ -108,12 +108,12 @@ func TestWithoutLineCommentsPutsEveryCommentInTheBody(t *testing.T) {
 		Comments: []geminiComment{{Path: "a.go", Line: 1, Body: "First."}, {Path: "b.go", Line: 2, Body: "Second."}},
 	}
 
-	got := withoutLineComments(review, "abc")
+	got := withoutLineComments(review, "abc", "Reviewed by `m`.")
 
 	if len(got.Comments) != 0 || got.Event != "COMMENT" || got.CommitID != "abc" {
 		t.Errorf("review = %+v, want a COMMENT review on abc with no line comments", got)
 	}
-	for _, part := range []string{"- `a.go` line 1: First.", "- `b.go` line 2: Second."} {
+	for _, part := range []string{"- `a.go` line 1: First.", "- `b.go` line 2: Second.", "Reviewed by `m`."} {
 		if !strings.Contains(got.Body, part) {
 			t.Errorf("body lacks %q:\n%s", part, got.Body)
 		}
