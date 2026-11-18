@@ -40,11 +40,30 @@ tests, for debugging.
 To run the server by hand:
 
 ```sh
-go run ./cmd/server                  # http://localhost:8080
-curl http://localhost:8080/health
+export CONNECTOR_API_KEY=any-local-test-key   # required; the server will not start without it
+go run ./cmd/server                           # http://localhost:8080
+curl http://localhost:8080/health             # open
+curl -H "x-api-key: $CONNECTOR_API_KEY" http://localhost:8080/mcp
 ```
 
 Set `PORT` to listen elsewhere.
+
+## Configuration
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `CONNECTOR_API_KEY` | Yes | The key every request except `GET /health` must send in its `x-api-key` header. In production it comes from Secret Manager. Never log it. |
+| `PORT` | No | The port to listen on; 8080 by default. Cloud Run sets it. |
+
+A request with no key or the wrong key gets `401 unauthorized`, the same
+answer either way. The key is compared as a SHA-256 digest in constant
+time, so response timing reveals neither its content nor its length. The
+server refuses to start if the key is missing or has leading or trailing
+whitespace, such as a trailing newline saved with the secret.
+
+The end-to-end script generates a throwaway key for each run. To call a
+server you kept up with `KEEP_E2E_UP=1`, set `CONNECTOR_API_KEY` yourself
+before running the script.
 
 ## Testing approach
 
@@ -102,5 +121,6 @@ tab with its number.
 
 ## Status
 
-Skeleton only: the server answers `GET /health`. Authentication, MCP tools
-and Oura access arrive in later pull requests; see the repository's issues.
+The server answers `GET /health` and requires the API key on everything
+else. MCP tools and Oura access arrive in later pull requests; see the KAN
+project in Jira.

@@ -29,11 +29,21 @@ func baseURL() string {
 	return "http://127.0.0.1:8080"
 }
 
-// get sends a GET request for path to the server under test.
-func get(ctx context.Context, path string) (*http.Response, error) {
+// apiKey is the connector API key the server under test was started with.
+// scripts/e2e-test.sh generates one for each run.
+func apiKey() string {
+	return os.Getenv("CONNECTOR_API_KEY")
+}
+
+// get sends a GET request for path to the server under test, with key in the
+// x-api-key header unless key is empty.
+func get(ctx context.Context, path, key string) (*http.Response, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL()+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request for %s: %w", path, err)
+	}
+	if key != "" {
+		request.Header.Set("x-api-key", key)
 	}
 	response, err := client.Do(request)
 	if err != nil {
@@ -42,11 +52,12 @@ func get(ctx context.Context, path string) (*http.Response, error) {
 	return response, nil
 }
 
-// getForTest sends a GET request for path and returns the response status
-// and body. It fails the test if the request fails.
-func getForTest(t *testing.T, path string) (status int, body string) {
+// getForTest sends a GET request for path, with key in the x-api-key header
+// unless key is empty, and returns the response status and body. It fails
+// the test if the request fails.
+func getForTest(t *testing.T, path, key string) (status int, body string) {
 	t.Helper()
-	response, err := get(t.Context(), path)
+	response, err := get(t.Context(), path, key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,6 +80,11 @@ func closeBody(t *testing.T, response *http.Response) {
 // TestMain waits for the server to accept requests before running any test,
 // so a slow container start is not reported as a test failure.
 func TestMain(m *testing.M) {
+	if apiKey() == "" {
+		fmt.Fprintln(os.Stderr,
+			"CONNECTOR_API_KEY is not set: set it to the key the server was started with, or run these tests with scripts/e2e-test.sh")
+		os.Exit(1)
+	}
 	if err := waitUntilHealthy(); err != nil {
 		fmt.Fprintf(os.Stderr,
 			"could not reach the server at %s: %v\nIs it running? Start it and run these tests with scripts/e2e-test.sh\n",
@@ -96,7 +112,7 @@ func waitUntilHealthy() error {
 
 // checkHealth makes one health check and returns an error unless it passes.
 func checkHealth(ctx context.Context) error {
-	response, err := get(ctx, "/health")
+	response, err := get(ctx, "/health", "")
 	if err != nil {
 		return err
 	}

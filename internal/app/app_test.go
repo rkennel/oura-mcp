@@ -1,12 +1,15 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -137,15 +140,17 @@ func TestServeUntilCancelledReportsAnUnexpectedErrorAfterShutdown(t *testing.T) 
 func TestServeReportsAListenerFailure(t *testing.T) {
 	failure := errors.New("accept failed")
 
-	err := Serve(context.Background(), fakeListener{acceptErr: failure}, discardLogger())
+	err := Serve(context.Background(), fakeListener{acceptErr: failure}, http.NotFoundHandler(), discardLogger())
 
 	if !errors.Is(err, failure) {
 		t.Errorf("error = %v, want it to wrap %v", err, failure)
 	}
 }
 
-func TestNewServerSetsTheRoutesAndTimeouts(t *testing.T) {
-	server := newServer()
+func TestNewServerSetsTheHandlerAndTimeouts(t *testing.T) {
+	handler := http.NotFoundHandler()
+
+	server := newServer(handler)
 
 	if server.Handler == nil {
 		t.Error("Handler is nil")
@@ -175,14 +180,14 @@ func unexpectedListen(t *testing.T) listenFunc {
 }
 
 func unexpectedServe(t *testing.T) serveFunc {
-	return func(context.Context, net.Listener, *slog.Logger) error {
+	return func(context.Context, net.Listener, http.Handler, *slog.Logger) error {
 		t.Error("serve was called")
 		return errors.New("unexpected serve")
 	}
 }
 
 func TestRunRejectsInvalidConfigurationBeforeListening(t *testing.T) {
-	getenv := envOf(map[string]string{"PORT": "nope"})
+	getenv := validEnv(map[string]string{"PORT": "nope"})
 
 	err := run(context.Background(), getenv, discardLogger(), unexpectedListen(t), unexpectedServe(t))
 
@@ -195,7 +200,7 @@ func TestRunReportsAListenFailureWithoutServing(t *testing.T) {
 	failure := errors.New("address already in use")
 	listen := func(string, string) (net.Listener, error) { return nil, failure }
 
-	err := run(context.Background(), envOf(nil), discardLogger(), listen, unexpectedServe(t))
+	err := run(context.Background(), validEnv(nil), discardLogger(), listen, unexpectedServe(t))
 
 	if !errors.Is(err, failure) {
 		t.Errorf("error = %v, want it to wrap %v", err, failure)
@@ -208,9 +213,9 @@ func TestRunListensOnTheConfiguredAddress(t *testing.T) {
 		network, address = n, a
 		return fakeListener{}, nil
 	}
-	serve := func(context.Context, net.Listener, *slog.Logger) error { return nil }
+	serve := func(context.Context, net.Listener, http.Handler, *slog.Logger) error { return nil }
 
-	if err := run(context.Background(), envOf(map[string]string{"PORT": "9090"}), discardLogger(), listen, serve); err != nil {
+	if err := run(context.Background(), validEnv(map[string]string{"PORT": "9090"}), discardLogger(), listen, serve); err != nil {
 		t.Fatalf("run returned an error: %v", err)
 	}
 
@@ -227,12 +232,12 @@ func TestRunServesOnTheListenerWithTheCallersContext(t *testing.T) {
 	outcome := errors.New("serve outcome")
 	var servedCtx context.Context
 	var servedListener net.Listener
-	serve := func(c context.Context, l net.Listener, _ *slog.Logger) error {
+	serve := func(c context.Context, l net.Listener, _ http.Handler, _ *slog.Logger) error {
 		servedCtx, servedListener = c, l
 		return outcome
 	}
 
-	err := run(ctx, envOf(nil), discardLogger(), listen, serve)
+	err := run(ctx, validEnv(nil), discardLogger(), listen, serve)
 
 	if !errors.Is(err, outcome) {
 		t.Errorf("error = %v, want serve's result %v", err, outcome)
@@ -242,5 +247,71 @@ func TestRunServesOnTheListenerWithTheCallersContext(t *testing.T) {
 	}
 	if servedListener != listener {
 		t.Error("serve did not receive the listener run opened")
+	}
+}
+
+func TestRunRequiresTheConnectorAPIKeyBeforeListening(t *testing.T) {
+	err := run(context.Background(), envOf(nil), discardLogger(), unexpectedListen(t), unexpectedServe(t))
+
+	if err == nil || !strings.Contains(err.Error(), "CONNECTOR_API_KEY") {
+		t.Errorf("error = %v, want one that names CONNECTOR_API_KEY", err)
+	}
+}
+
+// statusFrom sends a GET request for path, with key in the x-api-key header
+// unless key is empty, and returns the response status.
+func statusFrom(t *testing.T, handler http.Handler, path, key string) int {
+	t.Helper()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+	if key != "" {
+		request.Header.Set("x-api-key", key)
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	return recorder.Code
+}
+
+func TestRunServesRoutesProtectedByTheConfiguredKey(t *testing.T) {
+	listen := func(string, string) (net.Listener, error) { return fakeListener{}, nil }
+	var served http.Handler
+	serve := func(_ context.Context, _ net.Listener, h http.Handler, _ *slog.Logger) error {
+		served = h
+		return nil
+	}
+
+	if err := run(context.Background(), validEnv(nil), discardLogger(), listen, serve); err != nil {
+		t.Fatalf("run returned an error: %v", err)
+	}
+
+	checks := []struct {
+		name, path, key string
+		want            int
+	}{
+		{"health without a key", "/health", "", http.StatusOK},
+		{"other path without a key", "/mcp", "", http.StatusUnauthorized},
+		{"other path with a wrong key", "/mcp", "wrong-key", http.StatusUnauthorized},
+		{"other path with the configured key", "/mcp", testAPIKey, http.StatusNotFound},
+	}
+	for _, check := range checks {
+		if got := statusFrom(t, served, check.path, check.key); got != check.want {
+			t.Errorf("%s: status = %d, want %d", check.name, got, check.want)
+		}
+	}
+}
+
+func TestRunNeverLogsTheKey(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	listen := func(string, string) (net.Listener, error) {
+		return fakeListener{acceptErr: errors.New("accept failed")}, nil
+	}
+
+	_ = run(context.Background(), validEnv(nil), logger, listen, Serve)
+
+	if logs.Len() == 0 {
+		t.Fatal("nothing was logged, so this test proves nothing")
+	}
+	if strings.Contains(logs.String(), testAPIKey) {
+		t.Errorf("the logs contain the API key:\n%s", logs.String())
 	}
 }
