@@ -376,11 +376,7 @@ func (r routing) escalationReasons() []string {
 		reasons = append(reasons, fmt.Sprintf("has %d changed lines (high-risk from %d)", r.ChangedLines, r.Threshold))
 	}
 	if len(r.CriticalHits) > 0 {
-		var hits []string
-		for _, hit := range r.CriticalHits {
-			hits = append(hits, fmt.Sprintf("`%s` (%s)", hit.Path, hit.Why))
-		}
-		reasons = append(reasons, "touches critical paths: "+strings.Join(hits, ", "))
+		reasons = append(reasons, "touches critical paths: "+describeHits(r.CriticalHits))
 	}
 	if len(r.APIChanges) > 0 {
 		reasons = append(reasons, "changes the exported API of a shared package: `"+strings.Join(r.APIChanges, "`, `")+"`")
@@ -389,6 +385,30 @@ func (r routing) escalationReasons() []string {
 		reasons = append(reasons, fmt.Sprintf("triage by `%s` flagged it: %s", r.TriageModel, strings.TrimSpace(r.Triage.Reason)))
 	}
 	return reasons
+}
+
+// describeHits names the critical paths a pull request touches, one entry
+// per rule: the file when the rule matched one, else the pattern and a count,
+// so a change to many files in one critical directory stays one line.
+func describeHits(hits []criticalHit) string {
+	var order []string
+	byPattern := make(map[string][]criticalHit)
+	for _, hit := range hits {
+		if _, seen := byPattern[hit.Pattern]; !seen {
+			order = append(order, hit.Pattern)
+		}
+		byPattern[hit.Pattern] = append(byPattern[hit.Pattern], hit)
+	}
+	entries := make([]string, 0, len(order))
+	for _, pattern := range order {
+		matched := byPattern[pattern]
+		if len(matched) == 1 {
+			entries = append(entries, fmt.Sprintf("`%s` (%s)", matched[0].Path, matched[0].Why))
+			continue
+		}
+		entries = append(entries, fmt.Sprintf("%d files in `%s` (%s)", len(matched), pattern, matched[0].Why))
+	}
+	return strings.Join(entries, ", ")
 }
 
 func joinClauses(clauses []string) string {

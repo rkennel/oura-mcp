@@ -170,6 +170,15 @@ func TestAssessEscalatesOnCriticalPaths(t *testing.T) {
 	}
 }
 
+func TestExplainGroupsCriticalFilesByRule(t *testing.T) {
+	raw := diffOf("cmd/server/main.go", "", "+x") + diffOf("cmd/server/flags.go", "", "+x") + diffOf("internal/oura/token.go", "", "+x")
+	got := assessDiff(t, raw).explain()
+	want := "touches critical paths: 2 files in `cmd/server/**` (the entry point), `internal/oura/token.go` (token handling)"
+	if !strings.Contains(got, want) {
+		t.Errorf("explain = %q, want it to contain %q", got, want)
+	}
+}
+
 func TestAssessFindsChangesToTheExportedAPIOfSharedPackages(t *testing.T) {
 	for name, tc := range map[string]struct {
 		raw  string
