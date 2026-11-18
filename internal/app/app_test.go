@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -179,6 +178,10 @@ func unexpectedListen(t *testing.T) listenFunc {
 	}
 }
 
+// unusedHandler stands in for httpapi.NewHandler where a test does not look
+// at the handler run builds.
+func unusedHandler(string) http.Handler { return http.NotFoundHandler() }
+
 func unexpectedServe(t *testing.T) serveFunc {
 	return func(context.Context, net.Listener, http.Handler, *slog.Logger) error {
 		t.Error("serve was called")
@@ -189,7 +192,7 @@ func unexpectedServe(t *testing.T) serveFunc {
 func TestRunRejectsInvalidConfigurationBeforeListening(t *testing.T) {
 	getenv := validEnv(map[string]string{"PORT": "nope"})
 
-	err := run(context.Background(), getenv, discardLogger(), unexpectedListen(t), unexpectedServe(t))
+	err := run(context.Background(), getenv, discardLogger(), unexpectedListen(t), unusedHandler, unexpectedServe(t))
 
 	if err == nil {
 		t.Error("run returned nil for an invalid PORT")
@@ -200,7 +203,7 @@ func TestRunReportsAListenFailureWithoutServing(t *testing.T) {
 	failure := errors.New("address already in use")
 	listen := func(string, string) (net.Listener, error) { return nil, failure }
 
-	err := run(context.Background(), validEnv(nil), discardLogger(), listen, unexpectedServe(t))
+	err := run(context.Background(), validEnv(nil), discardLogger(), listen, unusedHandler, unexpectedServe(t))
 
 	if !errors.Is(err, failure) {
 		t.Errorf("error = %v, want it to wrap %v", err, failure)
@@ -215,7 +218,7 @@ func TestRunListensOnTheConfiguredAddress(t *testing.T) {
 	}
 	serve := func(context.Context, net.Listener, http.Handler, *slog.Logger) error { return nil }
 
-	if err := run(context.Background(), validEnv(map[string]string{"PORT": "9090"}), discardLogger(), listen, serve); err != nil {
+	if err := run(context.Background(), validEnv(map[string]string{"PORT": "9090"}), discardLogger(), listen, unusedHandler, serve); err != nil {
 		t.Fatalf("run returned an error: %v", err)
 	}
 
@@ -237,7 +240,7 @@ func TestRunServesOnTheListenerWithTheCallersContext(t *testing.T) {
 		return outcome
 	}
 
-	err := run(ctx, validEnv(nil), discardLogger(), listen, serve)
+	err := run(ctx, validEnv(nil), discardLogger(), listen, unusedHandler, serve)
 
 	if !errors.Is(err, outcome) {
 		t.Errorf("error = %v, want serve's result %v", err, outcome)
@@ -251,51 +254,39 @@ func TestRunServesOnTheListenerWithTheCallersContext(t *testing.T) {
 }
 
 func TestRunRequiresTheConnectorAPIKeyBeforeListening(t *testing.T) {
-	err := run(context.Background(), envOf(nil), discardLogger(), unexpectedListen(t), unexpectedServe(t))
+	err := run(context.Background(), envOf(nil), discardLogger(), unexpectedListen(t), unusedHandler, unexpectedServe(t))
 
 	if err == nil || !strings.Contains(err.Error(), "CONNECTOR_API_KEY") {
 		t.Errorf("error = %v, want one that names CONNECTOR_API_KEY", err)
 	}
 }
 
-// statusFrom sends a GET request for path, with key in the x-api-key header
-// unless key is empty, and returns the response status.
-func statusFrom(t *testing.T, handler http.Handler, path, key string) int {
-	t.Helper()
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
-	if key != "" {
-		request.Header.Set("x-api-key", key)
-	}
-	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, request)
-	return recorder.Code
-}
+// markerHandler is a handler a test can recognise by identity.
+type markerHandler struct{ http.Handler }
 
-func TestRunServesRoutesProtectedByTheConfiguredKey(t *testing.T) {
+func TestRunServesTheHandlerBuiltFromTheConfiguredKey(t *testing.T) {
 	listen := func(string, string) (net.Listener, error) { return fakeListener{}, nil }
+	built := &markerHandler{http.NotFoundHandler()}
+	var keyUsed string
+	newHandler := func(apiKey string) http.Handler {
+		keyUsed = apiKey
+		return built
+	}
 	var served http.Handler
 	serve := func(_ context.Context, _ net.Listener, h http.Handler, _ *slog.Logger) error {
 		served = h
 		return nil
 	}
 
-	if err := run(context.Background(), validEnv(nil), discardLogger(), listen, serve); err != nil {
+	if err := run(context.Background(), validEnv(nil), discardLogger(), listen, newHandler, serve); err != nil {
 		t.Fatalf("run returned an error: %v", err)
 	}
 
-	checks := []struct {
-		name, path, key string
-		want            int
-	}{
-		{"health without a key", "/health", "", http.StatusOK},
-		{"other path without a key", "/mcp", "", http.StatusUnauthorized},
-		{"other path with a wrong key", "/mcp", "wrong-key", http.StatusUnauthorized},
-		{"other path with the configured key", "/mcp", testAPIKey, http.StatusNotFound},
+	if keyUsed != testAPIKey {
+		t.Errorf("handler built with key %q, want the configured key", keyUsed)
 	}
-	for _, check := range checks {
-		if got := statusFrom(t, served, check.path, check.key); got != check.want {
-			t.Errorf("%s: status = %d, want %d", check.name, got, check.want)
-		}
+	if served != http.Handler(built) {
+		t.Error("serve did not receive the handler run built")
 	}
 }
 
@@ -306,7 +297,7 @@ func TestRunNeverLogsTheKey(t *testing.T) {
 		return fakeListener{acceptErr: errors.New("accept failed")}, nil
 	}
 
-	_ = run(context.Background(), validEnv(nil), logger, listen, Serve)
+	_ = run(context.Background(), validEnv(nil), logger, listen, unusedHandler, Serve)
 
 	if logs.Len() == 0 {
 		t.Fatal("nothing was logged, so this test proves nothing")
