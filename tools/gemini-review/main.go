@@ -1,13 +1,23 @@
 // Command gemini-review is the deterministic half of the Gemini pull request
-// review workflow. Gemini only reads; this tool does the GitHub calls.
+// review workflow. Gemini only reads; this tool does the GitHub calls and
+// picks the model.
 //
 //	gemini-review prepare  writes the pull request and its line-numbered diff
 //	                       for Gemini to read
+//	gemini-review route    applies the routing file's rules to the diff and
+//	                       says whether the triage model should look too
+//	gemini-review decide   adds the triage model's verdict and names the
+//	                       model that reviews
 //	gemini-review post     posts Gemini's reply as a review, or fails
 //
-// Settings come from the environment: GITHUB_TOKEN, GITHUB_REPOSITORY,
-// GITHUB_API_URL (default https://api.github.com), PR_NUMBER, REVIEW_DIR (the
-// directory the two commands share) and, for post, GEMINI_REPLY.
+// Settings come from the environment. All commands use REVIEW_DIR, the
+// directory they share. prepare and post use GITHUB_TOKEN, GITHUB_REPOSITORY,
+// GITHUB_API_URL (default https://api.github.com) and PR_NUMBER. route reads
+// the routing file named by ROUTING_CONFIG. decide reads TRIAGE_REPLY and
+// TRIAGE_OUTPUT when triage ran, and post reads GEMINI_REPLY and
+// GEMINI_OUTPUT: the model's answer and Gemini CLI's JSON output, which shows
+// the model that answered. route and decide write step outputs to
+// GITHUB_OUTPUT, and decide and post add to GITHUB_STEP_SUMMARY.
 package main
 
 import (
@@ -28,6 +38,7 @@ const (
 	pullRequestFile = "pull-request.md"
 	rawDiffFile     = "pr.diff"
 	headFile        = "head-sha"
+	routingFile     = "routing.json"
 )
 
 func main() {
@@ -48,19 +59,29 @@ type config struct {
 
 func run(ctx context.Context, args []string, getenv func(string) string, httpClient *http.Client, out io.Writer) error {
 	if len(args) != 1 {
-		return errors.New("usage: gemini-review prepare|post")
-	}
-	cfg, err := loadConfig(getenv, httpClient)
-	if err != nil {
-		return err
+		return errors.New("usage: gemini-review prepare|route|decide|post")
 	}
 	switch args[0] {
-	case "prepare":
-		return prepare(ctx, cfg, out)
-	case "post":
-		return post(ctx, cfg, getenv("GEMINI_REPLY"), out)
+	case "prepare", "post":
+		cfg, err := loadConfig(getenv, httpClient)
+		if err != nil {
+			return err
+		}
+		if args[0] == "prepare" {
+			return prepare(ctx, cfg, out)
+		}
+		return post(ctx, cfg, reviewInputs{reply: getenv("GEMINI_REPLY"), cliOutput: getenv("GEMINI_OUTPUT"), summary: getenv("GITHUB_STEP_SUMMARY")}, out)
+	case "route", "decide":
+		steps, err := loadStepConfig(getenv)
+		if err != nil {
+			return err
+		}
+		if args[0] == "route" {
+			return routeCommand(steps, getenv("ROUTING_CONFIG"), out)
+		}
+		return decideCommand(steps, getenv("TRIAGE_REPLY"), getenv("TRIAGE_OUTPUT"), out)
 	default:
-		return fmt.Errorf("unknown command %q: want prepare or post", args[0])
+		return fmt.Errorf("unknown command %q: want prepare, route, decide or post", args[0])
 	}
 }
 
@@ -138,11 +159,25 @@ func pullRequestDocument(repo string, pr pullRequest, files []fileDiff) string {
 	return b.String()
 }
 
+// reviewInputs are what post needs from the review step and the runner.
+type reviewInputs struct {
+	reply     string // the model's answer
+	cliOutput string // Gemini CLI's JSON output file
+	summary   string // the job summary file; empty outside Actions
+}
+
 // post checks Gemini's reply and posts it as one review. Any failure is an
 // error, so the workflow's check is green only when a review was posted.
-func post(ctx context.Context, cfg config, reply string, out io.Writer) error {
-	review, err := parseGeminiReview(reply)
+func post(ctx context.Context, cfg config, inputs reviewInputs, out io.Writer) error {
+	review, err := parseGeminiReview(inputs.reply)
 	if err != nil {
+		return err
+	}
+	decision, err := readRouting(cfg.reviewDir)
+	if err != nil {
+		return err
+	}
+	if err := confirmModel(inputs.cliOutput, decision.Model); err != nil {
 		return err
 	}
 	head, err := os.ReadFile(filepath.Join(cfg.reviewDir, headFile))
@@ -159,16 +194,17 @@ func post(ctx context.Context, cfg config, reply string, out io.Writer) error {
 	}
 	commitID := strings.TrimSpace(string(head))
 
-	request := buildReview(review, commitID, anchors(files))
+	note := decision.explain()
+	request := buildReview(review, commitID, note, anchors(files))
 	url, err := cfg.client.createReview(ctx, cfg.prNumber, request)
 	if err != nil && isUnprocessable(err) && len(request.Comments) > 0 {
 		fmt.Fprintf(out, "::warning title=Gemini review::GitHub rejected the line comments (%v); posting them in the review body instead.\n", err)
-		request = withoutLineComments(review, commitID)
+		request = withoutLineComments(review, commitID, note)
 		url, err = cfg.client.createReview(ctx, cfg.prNumber, request)
 	}
 	if err != nil {
 		return fmt.Errorf("post the review: %w", err)
 	}
-	fmt.Fprintf(out, "Posted the Gemini review with %d line comments: %s\n", len(request.Comments), url)
-	return nil
+	fmt.Fprintf(out, "Posted the %s review with %d line comments: %s\n", decision.Model, len(request.Comments), url)
+	return appendFile(inputs.summary, fmt.Sprintf("### Gemini review posted\n\n%s\n\n%d line comments: %s\n", note, len(request.Comments), url))
 }
