@@ -92,7 +92,9 @@ func serveUntilCancelled(ctx context.Context, server httpServer, listener net.Li
 	}
 
 	logger.Info("server shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	// ctx is already cancelled, so the shutdown deadline starts from a copy
+	// of it that keeps its values but not its cancellation.
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)

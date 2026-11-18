@@ -3,7 +3,9 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"testing"
@@ -22,7 +24,46 @@ func baseURL() string {
 	if url := os.Getenv("E2E_BASE_URL"); url != "" {
 		return url
 	}
-	return "http://localhost:8080"
+	// 127.0.0.1 rather than localhost: compose publishes the port on IPv4
+	// loopback only, and localhost may resolve to ::1 first.
+	return "http://127.0.0.1:8080"
+}
+
+// get sends a GET request for path to the server under test.
+func get(ctx context.Context, path string) (*http.Response, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL()+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request for %s: %w", path, err)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("GET %s: %w", path, err)
+	}
+	return response, nil
+}
+
+// getForTest sends a GET request for path and returns the response status
+// and body. It fails the test if the request fails.
+func getForTest(t *testing.T, path string) (status int, body string) {
+	t.Helper()
+	response, err := get(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeBody(t, response)
+
+	content, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read body of %s: %v", path, err)
+	}
+	return response.StatusCode, string(content)
+}
+
+func closeBody(t *testing.T, response *http.Response) {
+	t.Helper()
+	if err := response.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
 }
 
 // TestMain waits for the server to accept requests before running any test,
@@ -38,19 +79,32 @@ func TestMain(m *testing.M) {
 }
 
 func waitUntilHealthy() error {
-	deadline := time.Now().Add(startupTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), startupTimeout)
+	defer cancel()
 	for {
-		response, err := client.Get(baseURL() + "/health")
+		err := checkHealth(ctx)
 		if err == nil {
-			response.Body.Close()
-			if response.StatusCode == http.StatusOK {
-				return nil
-			}
-			err = fmt.Errorf("health check returned status %d", response.StatusCode)
+			return nil
 		}
-		if time.Now().After(deadline) {
+		select {
+		case <-ctx.Done():
 			return err
+		case <-time.After(500 * time.Millisecond):
 		}
-		time.Sleep(500 * time.Millisecond)
 	}
+}
+
+// checkHealth makes one health check and returns an error unless it passes.
+func checkHealth(ctx context.Context) error {
+	response, err := get(ctx, "/health")
+	if err != nil {
+		return err
+	}
+	if err := response.Body.Close(); err != nil {
+		return fmt.Errorf("close health check body: %w", err)
+	}
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("health check returned status %d", response.StatusCode)
+	}
+	return nil
 }

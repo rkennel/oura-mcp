@@ -9,7 +9,7 @@ import (
 func TestHealthReportsOK(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
-	NewHandler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health", nil))
+	NewHandler().ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/health", nil))
 
 	if recorder.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", recorder.Code, http.StatusOK)
@@ -22,7 +22,7 @@ func TestHealthReportsOK(t *testing.T) {
 func TestHealthRejectsOtherMethods(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
-	NewHandler().ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/health", nil))
+	NewHandler().ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/health", nil))
 
 	if recorder.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want %d", recorder.Code, http.StatusMethodNotAllowed)
@@ -32,7 +32,7 @@ func TestHealthRejectsOtherMethods(t *testing.T) {
 func TestUnknownPathIsNotFound(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
-	NewHandler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/no-such-path", nil))
+	NewHandler().ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/no-such-path", nil))
 
 	if recorder.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want %d", recorder.Code, http.StatusNotFound)

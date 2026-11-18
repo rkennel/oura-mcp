@@ -1,0 +1,32 @@
+# golangci-lint configuration. The linter version is pinned in
+# scripts/static-analysis.sh.
+version: "2"
+
+run:
+  # Lint the end-to-end tests too; they are otherwise not compiled.
+  build-tags:
+    - e2e
+
+linters:
+  # The standard set (errcheck, govet, ineffassign, staticcheck, unused) plus
+  # linters for the mistakes this service is most exposed to: unclosed
+  # response bodies, requests without a context, unwrapped errors and
+  # insecure handling of the API key and tokens.
+  enable:
+    - bodyclose
+    - contextcheck
+    - copyloopvar
+    - errorlint
+    - gocritic
+    - gosec
+    - misspell
+    - noctx
+    - unconvert
+    - unparam
+    - wrapcheck
+
+  settings:
+    wrapcheck:
+      # Errors from this module's own packages already carry their context.
+      ignore-package-globs:
+        - github.com/rkennel/oura-mcp/*
