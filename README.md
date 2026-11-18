@@ -23,10 +23,13 @@ and deployed as a container on Google Cloud Run.
 ## Common commands
 
 CI and local runs use the same scripts, so a local pass predicts a CI pass.
+`golangci-lint` and `govulncheck` need no install: the script runs the
+versions it pins with `go run`. The first run builds them, which takes a
+minute or two. `govulncheck` needs to reach https://vuln.go.dev.
 
 | Command | What it does |
 |---|---|
-| `scripts/static-analysis.sh` | `gofmt` check, `go vet`, and a `go.mod` tidiness check |
+| `scripts/static-analysis.sh` | `gofmt` check, `go vet`, a `go.mod` tidiness check, `golangci-lint` and `govulncheck` |
 | `scripts/unit-test.sh` | Unit tests with the race detector, failing below 85% coverage |
 | `scripts/e2e-test.sh` | Builds the production image, runs it, and runs the end-to-end tests against it |
 | `scripts/local-ci.sh` | All three in order, stopping at the first failure |
@@ -55,6 +58,11 @@ Set `PORT` to listen elsewhere.
 
 Every pull request runs three stages, each only if the previous one passes:
 static analysis, unit tests with the coverage gate, then end-to-end tests.
+
+Versions are pinned so a run today matches a run next month: the Go
+toolchain in `go.mod`, the linters in `scripts/static-analysis.sh`, the base
+images in `Dockerfile` by digest, and third-party actions by commit SHA. Lint
+rules live in `.golangci.yml`.
 
 ## Code review by Gemini
 
