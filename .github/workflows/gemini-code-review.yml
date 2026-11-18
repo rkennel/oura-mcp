@@ -25,7 +25,8 @@ concurrency:
 jobs:
   review:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The first runs took about seven minutes, most of it Gemini.
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: write
