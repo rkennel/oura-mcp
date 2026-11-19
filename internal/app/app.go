@@ -28,9 +28,13 @@ const (
 // Production code passes net.Listen.
 type listenFunc func(network, address string) (net.Listener, error)
 
-// serveFunc serves on listener until ctx is cancelled. Production code passes
-// Serve.
-type serveFunc func(ctx context.Context, listener net.Listener, logger *slog.Logger) error
+// handlerFunc builds the handler for every route, protected by apiKey.
+// Production code passes httpapi.NewHandler.
+type handlerFunc func(apiKey string) http.Handler
+
+// serveFunc serves handler on listener until ctx is cancelled. Production
+// code passes Serve.
+type serveFunc func(ctx context.Context, listener net.Listener, handler http.Handler, logger *slog.Logger) error
 
 // httpServer is the part of *http.Server that the serving lifecycle drives.
 type httpServer interface {
@@ -41,12 +45,12 @@ type httpServer interface {
 // Run loads configuration, listens on the configured address and serves
 // until ctx is cancelled.
 func Run(ctx context.Context, getenv func(string) string, logger *slog.Logger) error {
-	return run(ctx, getenv, logger, net.Listen, Serve)
+	return run(ctx, getenv, logger, net.Listen, httpapi.NewHandler, Serve)
 }
 
 // run is Run with its network collaborators injected, so that unit tests
 // can replace them.
-func run(ctx context.Context, getenv func(string) string, logger *slog.Logger, listen listenFunc, serve serveFunc) error {
+func run(ctx context.Context, getenv func(string) string, logger *slog.Logger, listen listenFunc, newHandler handlerFunc, serve serveFunc) error {
 	config, err := LoadConfig(getenv)
 	if err != nil {
 		return err
@@ -57,20 +61,20 @@ func run(ctx context.Context, getenv func(string) string, logger *slog.Logger, l
 		return fmt.Errorf("listen on %s: %w", config.Addr, err)
 	}
 
-	return serve(ctx, listener, logger)
+	return serve(ctx, listener, newHandler(config.APIKey), logger)
 }
 
-// Serve handles requests on listener until ctx is cancelled, then shuts
-// down gracefully. It returns nil after a clean shutdown.
-func Serve(ctx context.Context, listener net.Listener, logger *slog.Logger) error {
-	return serveUntilCancelled(ctx, newServer(), listener, logger)
+// Serve handles requests on listener with handler until ctx is cancelled,
+// then shuts down gracefully. It returns nil after a clean shutdown.
+func Serve(ctx context.Context, listener net.Listener, handler http.Handler, logger *slog.Logger) error {
+	return serveUntilCancelled(ctx, newServer(handler), listener, logger)
 }
 
-// newServer returns the HTTP server with the routes and timeouts the
+// newServer returns an HTTP server for handler with the timeouts the
 // service runs with.
-func newServer() *http.Server {
+func newServer(handler http.Handler) *http.Server {
 	return &http.Server{
-		Handler:           httpapi.NewHandler(),
+		Handler:           handler,
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,

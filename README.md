@@ -33,18 +33,57 @@ minute or two. `govulncheck` needs to reach https://vuln.go.dev.
 | `scripts/unit-test.sh` | Unit tests with the race detector, failing below 85% coverage |
 | `scripts/e2e-test.sh` | Builds the production image, runs it, and runs the end-to-end tests against it |
 | `scripts/local-ci.sh` | All three in order, stopping at the first failure |
+| `scripts/run-server.sh` | Runs the server locally with the settings in `.env` |
 
 Set `KEEP_E2E_UP=1` to leave the end-to-end container running after the
 tests, for debugging.
 
-To run the server by hand:
+To run the server by hand, set up your local settings once (see
+[Configuration](#configuration)), then:
 
 ```sh
-go run ./cmd/server                  # http://localhost:8080
-curl http://localhost:8080/health
+scripts/run-server.sh                                  # http://localhost:8080
+curl http://localhost:8080/health                      # open
+curl -H "x-api-key: <your CONNECTOR_API_KEY>" http://localhost:8080/mcp
 ```
 
-Set `PORT` to listen elsewhere.
+## Configuration
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `CONNECTOR_API_KEY` | Yes | The key every request except `GET /health` must send in its `x-api-key` header. In production it comes from Secret Manager. Never log it. |
+| `PORT` | No | The port to listen on; 8080 by default. Cloud Run sets it. |
+
+### Setting them locally
+
+The server reads only real environment variables. For local runs, keep them
+in a `.env` file at the repository root, which the scripts load for you:
+
+1. Copy the sample: `cp .env.example .env`
+2. Edit `.env` and set each variable. Any value works for
+   `CONNECTOR_API_KEY` locally; use the same value in the `x-api-key`
+   header when you call the server.
+3. Run `scripts/run-server.sh`. `scripts/e2e-test.sh` loads `.env` too.
+
+Git ignores `.env` (and `.env.*`, apart from `.env.example`), and Docker
+leaves it out of the image, so a key in it stays on your machine. A variable
+already set in your shell wins over `.env`, so
+`PORT=9090 scripts/run-server.sh` overrides it for one run. The file is read
+as plain `KEY=value` lines, not run as a script. When you add a setting the
+server reads, add it to `.env.example` and the table above.
+
+In production, Cloud Run sets these variables, with `CONNECTOR_API_KEY`
+taken from Secret Manager.
+
+A request with no key or the wrong key gets `401 unauthorized`, the same
+answer either way. The key is compared as a SHA-256 digest in constant
+time, so response timing reveals neither its content nor its length. The
+server refuses to start if the key is missing or has leading or trailing
+whitespace, such as a trailing newline saved with the secret.
+
+The end-to-end script uses `CONNECTOR_API_KEY` from your shell or `.env`,
+or generates a throwaway key for the run when neither sets one. Use your own
+key to call a server you kept up with `KEEP_E2E_UP=1`.
 
 ## Testing approach
 
@@ -102,5 +141,6 @@ tab with its number.
 
 ## Status
 
-Skeleton only: the server answers `GET /health`. Authentication, MCP tools
-and Oura access arrive in later pull requests; see the repository's issues.
+The server answers `GET /health` and requires the API key on everything
+else. MCP tools and Oura access arrive in later pull requests; see the KAN
+project in Jira.

@@ -7,6 +7,8 @@ services:
       dockerfile: Dockerfile
     environment:
       PORT: "8080"
+      # scripts/e2e-test.sh generates a throwaway key for each run.
+      CONNECTOR_API_KEY: ${CONNECTOR_API_KEY:?set CONNECTOR_API_KEY, or run scripts/e2e-test.sh}
     ports:
       # Loopback only, so the server is not reachable from the local network.
       - "127.0.0.1:8080:8080"

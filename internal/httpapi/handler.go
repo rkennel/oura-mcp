@@ -4,10 +4,19 @@ package httpapi
 import "net/http"
 
 // NewHandler returns the handler for every route the server exposes.
-func NewHandler() http.Handler {
+// GET /health is open; every other request must carry apiKey in its
+// x-api-key header. apiKey must not be empty.
+func NewHandler(apiKey string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handleHealth)
+	mux.Handle("/", RequireAPIKey(apiKey, newProtectedRoutes()))
 	return mux
+}
+
+// newProtectedRoutes returns the routes that only a caller with the API key
+// can reach. Until the MCP endpoint arrives, every path here is not found.
+func newProtectedRoutes() http.Handler {
+	return http.NewServeMux()
 }
 
 // handleHealth reports that the process is up. It deliberately reveals
