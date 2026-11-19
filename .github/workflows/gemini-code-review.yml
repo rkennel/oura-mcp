@@ -29,8 +29,55 @@ concurrency:
 # Gemini error, a reply that is not a review, a fallback to another model or
 # a refused post turns it red. On a pull request with nothing to fix, the
 # review says "No issues found."
+#
+# The review runs only on pull requests from this repository's own branches.
+# It builds and runs the pull request's code with the Gemini key and a token
+# that can write, so a fork's code must never reach it, including when
+# someone starts the review by hand. The origin job checks first, with no
+# secrets and a read-only token, and the review job is skipped unless the
+# head branch is in this repository; the origin job's summary says why.
+# pull_request_target is not used: it would hand a fork's run the secrets.
 jobs:
+  origin:
+    name: Check where the pull request comes from
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      same_repo: ${{ steps.origin.outputs.same_repo }}
+    steps:
+      # The default ref: on a manual run, the branch the workflow was started
+      # from, which is in this repository; on a pull_request run, the pull
+      # request's merge commit. A fork's pull_request run gets no secrets and
+      # a read-only token, so its code running here reaches nothing.
+      - name: Checkout the workflow's commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: tools/gemini-review/go.mod
+          cache: false
+
+      - name: Build the review tool
+        working-directory: tools/gemini-review
+        run: go build -o "${RUNNER_TEMP}/gemini-review" .
+
+      # Asks GitHub for the pull request's head repository, so a manual run,
+      # which knows only the number, is checked the same way.
+      - name: Check the pull request's head repository
+        id: origin
+        run: '"${RUNNER_TEMP}/gemini-review" origin'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+
   review:
+    needs: origin
+    if: needs.origin.outputs.same_repo == 'true'
     runs-on: ubuntu-latest
     # The first runs took about seven minutes, most of it Gemini.
     timeout-minutes: 15
