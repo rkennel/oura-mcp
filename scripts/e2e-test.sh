@@ -3,9 +3,9 @@
 # tests against it. The container is always stopped afterwards; set
 # KEEP_E2E_UP=1 to leave it running for debugging.
 # COMPOSE_FILE may add override files; CI uses it to enable layer caching.
-# The server gets a throwaway CONNECTOR_API_KEY generated for this run; set
-# CONNECTOR_API_KEY yourself to choose it, for example to call a server you
-# keep up with KEEP_E2E_UP.
+# The server uses CONNECTOR_API_KEY from your shell or .env (see
+# .env.example), or a throwaway key generated for this run when neither sets
+# one. Choose it yourself to call a server you keep up with KEEP_E2E_UP.
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -15,6 +15,7 @@ COMPOSE=(docker compose)
 require_command go "https://go.dev/doc/install"
 require_command docker "https://docs.docker.com/get-docker/"
 
+load_env_file
 if [ -z "${CONNECTOR_API_KEY:-}" ]; then
     CONNECTOR_API_KEY="e2e-$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 fi
