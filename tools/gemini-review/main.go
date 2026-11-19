@@ -2,6 +2,8 @@
 // review workflow. Gemini only reads; this tool does the GitHub calls and
 // picks the model.
 //
+//	gemini-review origin   says whether the pull request comes from a branch
+//	                       in this repository, and so whether the review runs
 //	gemini-review prepare  writes the pull request and its line-numbered diff
 //	                       for Gemini to read
 //	gemini-review route    applies the routing file's rules to the diff and
@@ -11,13 +13,15 @@
 //	gemini-review post     posts Gemini's reply as a review, or fails
 //
 // Settings come from the environment. All commands use REVIEW_DIR, the
-// directory they share. prepare and post use GITHUB_TOKEN, GITHUB_REPOSITORY,
+// directory they share, except origin, which runs before anything is
+// prepared. origin, prepare and post use GITHUB_TOKEN, GITHUB_REPOSITORY,
 // GITHUB_API_URL (default https://api.github.com) and PR_NUMBER. route reads
 // the routing file named by ROUTING_CONFIG. decide reads TRIAGE_REPLY and
 // TRIAGE_OUTPUT when triage ran, and post reads GEMINI_REPLY and
 // GEMINI_OUTPUT: the model's answer and Gemini CLI's JSON output, which shows
 // the model that answered. route and decide write step outputs to
-// GITHUB_OUTPUT, and decide and post add to GITHUB_STEP_SUMMARY.
+// GITHUB_OUTPUT, and decide and post add to GITHUB_STEP_SUMMARY. origin
+// writes to GITHUB_OUTPUT, and to GITHUB_STEP_SUMMARY when it skips.
 package main
 
 import (
@@ -59,9 +63,15 @@ type config struct {
 
 func run(ctx context.Context, args []string, getenv func(string) string, httpClient *http.Client, out io.Writer) error {
 	if len(args) != 1 {
-		return errors.New("usage: gemini-review prepare|route|decide|post")
+		return errors.New("usage: gemini-review origin|prepare|route|decide|post")
 	}
 	switch args[0] {
+	case "origin":
+		cfg, err := loadClientConfig(getenv, httpClient)
+		if err != nil {
+			return err
+		}
+		return originCommand(ctx, cfg, getenv("GITHUB_OUTPUT"), getenv("GITHUB_STEP_SUMMARY"), out)
 	case "prepare", "post":
 		cfg, err := loadConfig(getenv, httpClient)
 		if err != nil {
@@ -81,13 +91,27 @@ func run(ctx context.Context, args []string, getenv func(string) string, httpCli
 		}
 		return decideCommand(steps, getenv("TRIAGE_REPLY"), getenv("TRIAGE_OUTPUT"), out)
 	default:
-		return fmt.Errorf("unknown command %q: want prepare, route, decide or post", args[0])
+		return fmt.Errorf("unknown command %q: want origin, prepare, route, decide or post", args[0])
 	}
 }
 
+// loadConfig is loadClientConfig plus the directory prepare and post share.
 func loadConfig(getenv func(string) string, httpClient *http.Client) (config, error) {
+	cfg, err := loadClientConfig(getenv, httpClient)
+	if err != nil {
+		return config{}, err
+	}
+	if getenv("REVIEW_DIR") == "" {
+		return config{}, errors.New("missing environment: REVIEW_DIR")
+	}
+	cfg.reviewDir = getenv("REVIEW_DIR")
+	return cfg, nil
+}
+
+// loadClientConfig reads what a GitHub call about the pull request needs.
+func loadClientConfig(getenv func(string) string, httpClient *http.Client) (config, error) {
 	var missing []string
-	for _, name := range []string{"GITHUB_TOKEN", "GITHUB_REPOSITORY", "PR_NUMBER", "REVIEW_DIR"} {
+	for _, name := range []string{"GITHUB_TOKEN", "GITHUB_REPOSITORY", "PR_NUMBER"} {
 		if getenv(name) == "" {
 			missing = append(missing, name)
 		}
@@ -110,8 +134,7 @@ func loadConfig(getenv func(string) string, httpClient *http.Client) (config, er
 			token:   getenv("GITHUB_TOKEN"),
 			http:    httpClient,
 		},
-		prNumber:  number,
-		reviewDir: getenv("REVIEW_DIR"),
+		prNumber: number,
 	}, nil
 }
 
