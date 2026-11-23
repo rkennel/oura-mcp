@@ -10,6 +10,7 @@ and deployed as a container on Google Cloud Run.
 | `cmd/server` | The executable. Process wiring only. |
 | `internal/app` | Configuration and server lifecycle. |
 | `internal/httpapi` | HTTP routes and handlers. |
+| `api-explore/` | `.http` files that show how to call each API, for the REST Client extension. |
 | `e2e/` | End-to-end tests and their Docker Compose environment. |
 | `scripts/` | The CI stages, runnable locally, and the scripts that run the server on your machine. |
 | `tools/gemini-review` | Fetches a pull request for the Gemini review, picks the model, and posts Gemini's reply. Its own Go module. |
@@ -64,6 +65,20 @@ PID in `.run/server.pid`, which Git ignores.
 
 To watch requests as they arrive, run the server in the foreground instead
 with `scripts/run-server.sh` and stop it with Ctrl-C.
+
+## Exploring the API
+
+`api-explore/` holds `.http` files you can run from VS Code with the
+[REST Client](https://marketplace.visualstudio.com/items?itemName=humao.rest-client)
+extension (`humao.rest-client`, recommended in `.vscode/extensions.json`).
+Start the server, open a file such as `api-explore/health.http`, and click
+**Send Request** above a request.
+
+**When you add an API endpoint, add at least one `.http` file to
+`api-explore/` that shows how to call it.** Include a request for each
+success case and for the main failure, such as a missing key. Take the base
+URL from `@baseUrl`, and send the key as `x-api-key: {{apiKey}}` rather than
+writing a real key in the file.
 
 ## Configuration
 

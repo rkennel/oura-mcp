@@ -13,3 +13,8 @@
 # Gemini CLI settings and credentials
 .gemini/
 gha-creds-*.json
+
+# Editor settings: share only the project-level files
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json

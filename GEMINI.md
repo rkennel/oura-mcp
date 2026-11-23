@@ -25,6 +25,11 @@ do not restate what the code does.
   the consumer, `context.Context` as the first parameter of anything that
   does I/O.
 
+- **Every API is explorable.** A pull request that adds or changes an HTTP
+  endpoint adds or updates at least one `.http` file in `api-explore/` that
+  shows how to call it. Flag endpoints without one, and `.http` files that
+  contain a real key or token.
+
 ## Architecture rules
 
 - `cmd/` contains only process wiring. Flag logic that belongs in `internal/`.

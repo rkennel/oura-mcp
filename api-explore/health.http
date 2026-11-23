@@ -1,0 +1,8 @@
+# Run with the "REST Client" extension (humao.rest-client):
+# click "Send Request" above the request, or press Ctrl+Alt+R.
+# Start the server first: scripts/start-server.sh
+
+@baseUrl = http://localhost:8080
+
+### Health check (open: needs no API key)
+GET {{baseUrl}}/health
