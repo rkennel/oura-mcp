@@ -4,3 +4,5 @@
 e2e
 scripts
 *.md
+.run
+bin

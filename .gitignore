@@ -7,6 +7,14 @@
 .env*
 !.env.example
 
+# The background server's PID file and log (scripts/start-server.sh)
+/.run/
+
 # Gemini CLI settings and credentials
 .gemini/
 gha-creds-*.json
+
+# Editor settings: share only the project-level files
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
