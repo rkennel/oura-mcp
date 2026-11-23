@@ -45,8 +45,8 @@ func TestAMissingAndAWrongKeyGetTheSameAnswer(t *testing.T) {
 	}
 }
 
-// No route behind the key exists yet, so a request that passes the check is
-// answered by routing: not found, rather than unauthorized.
+// A request for a path with no route that passes the check is answered by
+// routing: not found, rather than unauthorized.
 func TestRequestsWithTheKeyPassTheCheck(t *testing.T) {
 	status, _ := getForTest(t, "/no-such-path", apiKey())
 

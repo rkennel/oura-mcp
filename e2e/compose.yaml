@@ -5,6 +5,10 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+      args:
+        # The version the server reports in the MCP handshake; the tests
+        # check for it.
+        VERSION: e2e
     environment:
       PORT: "8080"
       # scripts/e2e-test.sh generates a throwaway key for each run.

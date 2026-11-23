@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rkennel/oura-mcp/internal/httpapi"
+	"github.com/rkennel/oura-mcp/internal/mcpserver"
 )
 
 const (
@@ -29,7 +30,7 @@ const (
 type listenFunc func(network, address string) (net.Listener, error)
 
 // handlerFunc builds the handler for every route, protected by apiKey.
-// Production code passes httpapi.NewHandler.
+// Production code passes the one routes returns.
 type handlerFunc func(apiKey string) http.Handler
 
 // serveFunc serves handler on listener until ctx is cancelled. Production
@@ -43,9 +44,19 @@ type httpServer interface {
 }
 
 // Run loads configuration, listens on the configured address and serves
-// until ctx is cancelled.
-func Run(ctx context.Context, getenv func(string) string, logger *slog.Logger) error {
-	return run(ctx, getenv, logger, net.Listen, httpapi.NewHandler, Serve)
+// until ctx is cancelled. version is the build's version, which the MCP
+// server reports to clients.
+func Run(ctx context.Context, getenv func(string) string, logger *slog.Logger, version string) error {
+	return run(ctx, getenv, logger, net.Listen, routes(version), Serve)
+}
+
+// routes returns a handlerFunc that serves the MCP server, reporting
+// version, at its endpoint behind the API key. Like Run it only wires
+// packages together, so the end-to-end tests cover it.
+func routes(version string) handlerFunc {
+	return func(apiKey string) http.Handler {
+		return httpapi.NewHandler(apiKey, mcpserver.NewHTTPHandler(mcpserver.New(version)))
+	}
 }
 
 // run is Run with its network collaborators injected, so that unit tests
