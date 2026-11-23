@@ -16,8 +16,23 @@ func serve(t *testing.T, method, path, key string) *httptest.ResponseRecorder {
 		request.Header.Set(apiKeyHeader, key)
 	}
 	recorder := httptest.NewRecorder()
-	NewHandler(testAPIKey).ServeHTTP(recorder, request)
+	NewHandler(testAPIKey, &recordingHandler{}).ServeHTTP(recorder, request)
 	return recorder
+}
+
+// serveMCP sends method to MCPPath through the server's handler, with key
+// in the x-api-key header unless key is empty, and reports whether the
+// request reached the MCP handler.
+func serveMCP(t *testing.T, method, key string) (*httptest.ResponseRecorder, bool) {
+	t.Helper()
+	request := httptest.NewRequestWithContext(t.Context(), method, MCPPath, nil)
+	if key != "" {
+		request.Header.Set(apiKeyHeader, key)
+	}
+	mcp := &recordingHandler{}
+	recorder := httptest.NewRecorder()
+	NewHandler(testAPIKey, mcp).ServeHTTP(recorder, request)
+	return recorder, mcp.called
 }
 
 func TestHealthReportsOKWithoutAKey(t *testing.T) {
@@ -75,5 +90,35 @@ func TestTheRejectionDoesNotEchoTheKey(t *testing.T) {
 	}
 	if strings.Contains(recorder.Body.String(), testAPIKey) {
 		t.Errorf("body %q contains the expected key", recorder.Body.String())
+	}
+}
+
+func TestTheMCPEndpointReceivesRequestsWithTheKey(t *testing.T) {
+	for _, method := range []string{http.MethodPost, http.MethodGet, http.MethodDelete} {
+		t.Run(method, func(t *testing.T) {
+			recorder, reached := serveMCP(t, method, testAPIKey)
+
+			if !reached {
+				t.Errorf("%s %s with the key did not reach the MCP handler", method, MCPPath)
+			}
+			if recorder.Code != http.StatusOK {
+				t.Errorf("status = %d, want the MCP handler's %d", recorder.Code, http.StatusOK)
+			}
+		})
+	}
+}
+
+func TestTheMCPEndpointNeedsTheKey(t *testing.T) {
+	for name, key := range map[string]string{"missing": "", "wrong": "wrong-key"} {
+		t.Run(name, func(t *testing.T) {
+			recorder, reached := serveMCP(t, http.MethodPost, key)
+
+			if reached {
+				t.Errorf("a request with a %s key reached the MCP handler", name)
+			}
+			if recorder.Code != http.StatusUnauthorized {
+				t.Errorf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+			}
+		})
 	}
 }

@@ -10,6 +10,7 @@ and deployed as a container on Google Cloud Run.
 | `cmd/server` | The executable. Process wiring only. |
 | `internal/app` | Configuration and server lifecycle. |
 | `internal/httpapi` | HTTP routes and handlers. |
+| `internal/mcpserver` | The MCP server: its name and version, its tools, and the HTTP transport. |
 | `api-explore/` | `.http` files that show how to call each API, for the REST Client extension. |
 | `e2e/` | End-to-end tests and their Docker Compose environment. |
 | `scripts/` | The CI stages, runnable locally, and the scripts that run the server on your machine. |
@@ -50,7 +51,11 @@ start the server in the background and stop it when you are done:
 ```sh
 scripts/start-server.sh                                # builds, starts, waits for /health
 curl http://localhost:8080/health                      # open
-curl -H "x-api-key: <your CONNECTOR_API_KEY>" http://localhost:8080/mcp
+curl -X POST http://localhost:8080/mcp \
+  -H "x-api-key: <your CONNECTOR_API_KEY>" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ping","arguments":{}}}'
 scripts/stop-server.sh                                 # graceful shutdown
 ```
 
@@ -72,13 +77,32 @@ with `scripts/run-server.sh` and stop it with Ctrl-C.
 [REST Client](https://marketplace.visualstudio.com/items?itemName=humao.rest-client)
 extension (`humao.rest-client`, recommended in `.vscode/extensions.json`).
 Start the server, open a file such as `api-explore/health.http`, and click
-**Send Request** above a request.
+**Send Request** above a request. Requests that need the API key send it as
+`{{apiKey}}`, which `.vscode/settings.json` sets to the placeholder key from
+`.env.example`. If your `.env` uses another key, set
+`rest-client.environmentVariables` in your own user settings instead.
 
 **When you add an API endpoint, add at least one `.http` file to
 `api-explore/` that shows how to call it.** Include a request for each
 success case and for the main failure, such as a missing key. Take the base
 URL from `@baseUrl`, and send the key as `x-api-key: {{apiKey}}` rather than
 writing a real key in the file.
+
+## The MCP endpoint
+
+`POST /mcp` speaks the Model Context Protocol over the streamable HTTP
+transport, using the official Go SDK. It is stateless: the server keeps no
+session between requests, so each one stands alone and gets a plain JSON
+answer. Like every route except `GET /health`, it needs the API key.
+
+The server reports its name, `oura-mcp`, and its version in the MCP
+handshake. The version is `dev` unless the build sets it: the `Dockerfile`
+takes it as the `VERSION` build argument, and a plain `go build` takes
+`-ldflags "-X main.version=..."`.
+
+For now it offers one tool, `ping`, which takes no arguments and replies
+`pong`, so you can check that a client reaches the server before any Oura
+data is involved. `api-explore/mcp.http` has a request for each MCP call.
 
 ## Configuration
 
@@ -185,6 +209,7 @@ workflow, the review job is skipped and that job's summary says why.
 
 ## Status
 
-The server answers `GET /health` and requires the API key on everything
-else. MCP tools and Oura access arrive in later pull requests; see the KAN
-project in Jira.
+The server answers `GET /health`, serves MCP at `/mcp` with a placeholder
+`ping` tool, and requires the API key on everything except the health
+check. Oura access arrives in later pull requests; see the KAN project in
+Jira.

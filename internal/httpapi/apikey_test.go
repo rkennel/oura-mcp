@@ -8,8 +8,8 @@ import (
 
 const testAPIKey = "test-connector-key-0123456789"
 
-// recordingHandler stands in for the protected routes and records whether a
-// request reached it.
+// recordingHandler stands in for the handler behind a route and records
+// whether a request reached it.
 type recordingHandler struct {
 	called bool
 }

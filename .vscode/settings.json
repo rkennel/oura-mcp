@@ -1,5 +1,14 @@
 {
     "go.coverOnSingleTest": true,
     "go.coverOnSingleTestFile": true,
-    "go.coverOnTestPackage": true
+    "go.coverOnTestPackage": true,
+    // apiKey for the requests in api-explore/. This is the placeholder from
+    // .env.example; if your .env sets another CONNECTOR_API_KEY, put it in
+    // your user settings instead, never in this file.
+    "rest-client.environmentVariables": {
+        "$shared": {
+            "apiKey": "change-me-local-dev-key"
+        },
+        "local": {}
+    }
 }

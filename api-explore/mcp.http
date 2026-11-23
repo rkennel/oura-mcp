@@ -1,0 +1,50 @@
+# Run with the "REST Client" extension (humao.rest-client):
+# click "Send Request" above a request, or press Ctrl+Alt+R.
+# Start the server first: scripts/start-server.sh
+#
+# The MCP endpoint is stateless: each request stands alone, so you can send
+# them in any order. apiKey comes from rest-client.environmentVariables in
+# .vscode/settings.json, which holds the placeholder key from .env.example;
+# if your .env sets another key, set apiKey in your user settings instead.
+
+@baseUrl = http://localhost:8080
+
+### Initialize: the server reports its name and version
+POST {{baseUrl}}/mcp
+x-api-key: {{apiKey}}
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2025-06-18",
+    "capabilities": {},
+    "clientInfo": { "name": "rest-client", "version": "0" }
+  }
+}
+
+### List tools: ping is listed
+POST {{baseUrl}}/mcp
+x-api-key: {{apiKey}}
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }
+
+### Call ping: replies "pong"
+POST {{baseUrl}}/mcp
+x-api-key: {{apiKey}}
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "ping", "arguments": {} } }
+
+### Without the API key: 401 unauthorized
+POST {{baseUrl}}/mcp
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{ "jsonrpc": "2.0", "id": 4, "method": "tools/list" }
