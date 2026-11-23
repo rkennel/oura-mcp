@@ -11,7 +11,7 @@ and deployed as a container on Google Cloud Run.
 | `internal/app` | Configuration and server lifecycle. |
 | `internal/httpapi` | HTTP routes and handlers. |
 | `e2e/` | End-to-end tests and their Docker Compose environment. |
-| `scripts/` | The CI stages, runnable locally. |
+| `scripts/` | The CI stages, runnable locally, and the scripts that run the server on your machine. |
 | `tools/gemini-review` | Fetches a pull request for the Gemini review, picks the model, and posts Gemini's reply. Its own Go module. |
 | `Dockerfile` | The production image. |
 
@@ -32,20 +32,38 @@ minute or two. `govulncheck` needs to reach https://vuln.go.dev.
 | `scripts/static-analysis.sh` | `gofmt` check, `go vet`, a `go.mod` tidiness check, `golangci-lint` and `govulncheck` |
 | `scripts/unit-test.sh` | Unit tests with the race detector, failing below 85% coverage |
 | `scripts/e2e-test.sh` | Builds the production image, runs it, and runs the end-to-end tests against it |
-| `scripts/local-ci.sh` | All three in order, stopping at the first failure |
-| `scripts/run-server.sh` | Runs the server locally with the settings in `.env` |
+| `scripts/server-scripts-test.sh` | Tests the start and stop scripts below against a throwaway copy of the repository |
+| `scripts/local-ci.sh` | All of the above in order, stopping at the first failure |
+| `scripts/start-server.sh` | Builds the server and starts it in the background with the settings in `.env` |
+| `scripts/stop-server.sh` | Stops the server that `start-server.sh` started |
+| `scripts/run-server.sh` | Runs the server in the foreground with the settings in `.env` |
 
 Set `KEEP_E2E_UP=1` to leave the end-to-end container running after the
 tests, for debugging.
 
-To run the server by hand, set up your local settings once (see
-[Configuration](#configuration)), then:
+## Running the server locally
+
+Set up your local settings once (see [Configuration](#configuration)), then
+start the server in the background and stop it when you are done:
 
 ```sh
-scripts/run-server.sh                                  # http://localhost:8080
+scripts/start-server.sh                                # builds, starts, waits for /health
 curl http://localhost:8080/health                      # open
 curl -H "x-api-key: <your CONNECTOR_API_KEY>" http://localhost:8080/mcp
+scripts/stop-server.sh                                 # graceful shutdown
 ```
+
+`start-server.sh` builds the server into `bin/server`, starts it in the
+background, waits until `GET /health` answers, then prints the server's URL
+and where its log goes (`.run/server.log`, replaced on each start). It does
+nothing if the server is already running, and refuses to start if
+`CONNECTOR_API_KEY` is not set or another program already answers on the
+port. `stop-server.sh` asks the server to shut down gracefully and waits for
+it to exit; with no server running it just says so. Both keep the server's
+PID in `.run/server.pid`, which Git ignores.
+
+To watch requests as they arrive, run the server in the foreground instead
+with `scripts/run-server.sh` and stop it with Ctrl-C.
 
 ## Configuration
 
@@ -63,12 +81,13 @@ in a `.env` file at the repository root, which the scripts load for you:
 2. Edit `.env` and set each variable. Any value works for
    `CONNECTOR_API_KEY` locally; use the same value in the `x-api-key`
    header when you call the server.
-3. Run `scripts/run-server.sh`. `scripts/e2e-test.sh` loads `.env` too.
+3. Run `scripts/start-server.sh` (or `scripts/run-server.sh` for the
+   foreground). `scripts/e2e-test.sh` loads `.env` too.
 
 Git ignores `.env` (and `.env.*`, apart from `.env.example`), and Docker
 leaves it out of the image, so a key in it stays on your machine. A variable
 already set in your shell wins over `.env`, so
-`PORT=9090 scripts/run-server.sh` overrides it for one run. The file is read
+`PORT=9090 scripts/start-server.sh` overrides it for one run. The file is read
 as plain `KEY=value` lines, not run as a script. When you add a setting the
 server reads, add it to `.env.example` and the table above.
 
@@ -97,6 +116,7 @@ key to call a server you kept up with `KEEP_E2E_UP=1`.
 
 Every pull request runs three stages, each only if the previous one passes:
 static analysis, unit tests with the coverage gate, then end-to-end tests.
+The end-to-end stage also tests the local start and stop scripts.
 
 Versions are pinned so a run today matches a run next month: the Go
 toolchain in `go.mod`, the linters in `scripts/static-analysis.sh`, the base
