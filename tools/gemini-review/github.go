@@ -24,7 +24,10 @@ type pullRequest struct {
 	Title  string `json:"title"`
 	Body   string `json:"body"`
 	Head   struct {
-		SHA string `json:"sha"`
+		SHA  string `json:"sha"`
+		Repo struct {
+			FullName string `json:"full_name"` // owner/name; empty when the repository was deleted
+		} `json:"repo"`
 	} `json:"head"`
 }
 

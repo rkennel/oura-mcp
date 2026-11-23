@@ -139,6 +139,15 @@ the run fails rather than mislabel the review.
 To review a pull request again by hand, run the workflow from the Actions
 tab with its number.
 
+### Pull requests from forks
+
+The review runs only on pull requests from branches in this repository,
+because it builds and runs the pull request's code with the Gemini key and a
+token that can write. Before the review job starts, a job with no secrets and
+a read-only token asks GitHub where the pull request's head branch lives. On
+a fork's pull request, whether the pull request or a manual run started the
+workflow, the review job is skipped and that job's summary says why.
+
 ## Status
 
 The server answers `GET /health` and requires the API key on everything
