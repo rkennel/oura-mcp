@@ -24,16 +24,21 @@ do not restate what the code does.
   accept interfaces and return concrete types, small interfaces defined by
   the consumer, `context.Context` as the first parameter of anything that
   does I/O.
-
 - **Every API is explorable.** A pull request that adds or changes an HTTP
   endpoint adds or updates at least one `.http` file in `api-explore/` that
-  shows how to call it. Flag endpoints without one, and `.http` files that
-  contain a real key or token.
+  shows how to call it, with a request for each success case and the main
+  failure, sending the key as `x-api-key: {{apiKey}}`. Flag endpoints without
+  one, and `.http` files that contain a real key or token.
+- **Local scripts are tested.** A behaviour change to `scripts/start-server.sh` or
+  `scripts/stop-server.sh` comes with a case in
+  `scripts/server-scripts-test.sh`. Flag one that does not.
 
 ## Architecture rules
 
 - `cmd/` contains only process wiring. Flag logic that belongs in `internal/`.
 - Configuration is read from the environment in one place (`internal/app`).
+- A new setting the server reads is added to `.env.example` and to the
+  README's configuration table. Flag one that is missing from either.
 
 ## Security
 
