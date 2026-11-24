@@ -319,8 +319,11 @@ scenario is one criterion.
 Gemini says for each criterion whether the change satisfies it, partly
 satisfies it or does not, with a reason and the file, line or test that
 shows it, and lists each change of behaviour that no part of the story
-explains. A reply that leaves a criterion out fails the run, as a missing
-rule does. The review posts this as an "Acceptance criteria" section above
+explains. The story file gives the description first, as background, and the
+criteria last, and Gemini starts each verdict by quoting its criterion's
+Then line: a verdict whose quote is not its own criterion's could carry
+another criterion's reason, so it fails the run, as a reply that leaves a
+criterion or a rule out does. The review posts this as an "Acceptance criteria" section above
 the standards checklist; a criterion not fully satisfied counts as a
 finding, and a change outside the story is listed for you to weigh.
 
@@ -359,8 +362,12 @@ one satisfied, and list a change outside the story where the case names a
 file for one (`outside_path`) and none where it does not. The documentation
 case meets its story in full; `criterion-left-out` leaves a criterion out;
 `story-with-instructions` does too, with a story that tells the reviewer to
-pass every criterion; and `outside-the-story` changes the Oura timeout,
-which its story does not ask for.
+pass every criterion; `scope-out-of-order` leaves one out too, with a story
+whose scope lists the work in the opposite order to its criteria; and
+`outside-the-story` changes the Oura timeout, which its story does not ask
+for. Gemini quotes each criterion's Then line with its verdict, and a review
+whose quote is not its own criterion's fails, so that a reason cannot sit on
+the wrong criterion.
 
 It spends Gemini API calls, so it runs by hand. Run it **after changing the
 review prompt (`tools/gemini-review/prompt.go`), the routing or model IDs in

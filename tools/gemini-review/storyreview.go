@@ -20,7 +20,10 @@ type storyReply struct {
 
 // criterionVerdict is Gemini's verdict on one acceptance criterion.
 type criterionVerdict struct {
-	ID       string `json:"id"`
+	ID string `json:"id"`
+	// Quote is the criterion's Then line as Gemini copied it, which shows
+	// that the verdict after it is about this criterion.
+	Quote    string `json:"quote"`
 	Verdict  string `json:"verdict"`
 	Reason   string `json:"reason"`
 	Evidence string `json:"evidence"`
@@ -106,9 +109,9 @@ func assessStory(implemented story, reply *storyReply) (storyReview, error) {
 }
 
 func indexCriterionVerdicts(entries []criterionVerdict, implemented story) (map[string]criterionVerdict, error) {
-	known := map[string]bool{}
-	for _, id := range implemented.criterionIDs() {
-		known[id] = true
+	known := map[string]criterion{}
+	for _, c := range implemented.Criteria {
+		known[c.ID] = c
 	}
 	index := map[string]criterionVerdict{}
 	for i, entry := range entries {
@@ -116,9 +119,12 @@ func indexCriterionVerdicts(entries []criterionVerdict, implemented story) (map[
 		entry.Verdict = strings.ToLower(strings.TrimSpace(entry.Verdict))
 		entry.Reason = strings.TrimSpace(entry.Reason)
 		entry.Evidence = strings.TrimSpace(entry.Evidence)
+		judged, ok := known[entry.ID]
 		switch {
-		case !known[entry.ID]:
+		case !ok:
 			return nil, fmt.Errorf("gemini's criterion verdict %d names %q, which is not a criterion of %s", i+1, entry.ID, implemented.Key)
+		case !quotes(entry.Quote, judged):
+			return nil, fmt.Errorf("gemini's verdict on %s quotes %q, which is not that criterion's Then line, so its reason may be about another criterion", entry.ID, clip(entry.Quote, 80))
 		case !knownCriterionVerdict(entry.Verdict):
 			return nil, fmt.Errorf("gemini's verdict on %s is %q, not satisfied, partly or not_satisfied", entry.ID, entry.Verdict)
 		case entry.Reason == "":
@@ -129,6 +135,41 @@ func indexCriterionVerdicts(entries []criterionVerdict, implemented story) (map[
 		index[entry.ID] = entry
 	}
 	return index, nil
+}
+
+// quotes reports whether quote is the criterion's Then line, or a long
+// enough part of it, give or take case, marks and punctuation. A quote of
+// another criterion's Then line does not match.
+func quotes(quote string, c criterion) bool {
+	got, want := comparable(quote), comparable(c.quote())
+	if got == "" || want == "" {
+		return false
+	}
+	return strings.Contains(got, want) ||
+		(strings.Contains(want, got) && len(got) >= min(len(want), minQuoteLength))
+}
+
+// minQuoteLength is the shortest part of a long Then line that counts as a
+// quote of it.
+const minQuoteLength = 30
+
+// comparable folds text for comparing a quote with what it quotes: lower
+// case, no marks or quotation marks, no leading Then, single spaces and no
+// closing punctuation.
+func comparable(text string) string {
+	text = strings.ToLower(plainMarkdown(text))
+	text = strings.NewReplacer(`"`, "", "“", "", "”", "", "'", "", "’", "").Replace(text)
+	text = strings.Join(strings.Fields(text), " ")
+	text = strings.TrimPrefix(text, "then ")
+	return strings.TrimRight(text, ".;:, ")
+}
+
+// clip shortens text for an error message.
+func clip(text string, limit int) string {
+	if runes := []rune(text); len(runes) > limit {
+		return string(runes[:limit]) + "…"
+	}
+	return text
 }
 
 func knownCriterionVerdict(verdict string) bool {

@@ -390,8 +390,8 @@ func TestPostShowsTheVerdictOnEachAcceptanceCriterion(t *testing.T) {
 	dir, env := readyToPost(t, fake)
 	withStory(t, dir)
 	reply := `{"summary": "Fine.", ` + testChecklist + `, "story": {"criteria": [` +
-		`{"id": "AC1", "verdict": "satisfied", "reason": "Lists them.", "evidence": "review.go line 9"},` +
-		`{"id": "AC2", "verdict": "not_satisfied", "reason": "No message.", "evidence": "main.go"}],` +
+		`{"id": "AC1", "quote": "Lists each criterion.", "verdict": "satisfied", "reason": "Lists them.", "evidence": "review.go line 9"},` +
+		`{"id": "AC2", "quote": "Says when the story is missing.", "verdict": "not_satisfied", "reason": "No message.", "evidence": "main.go"}],` +
 		`"outside": [{"path": "internal/app/config.go", "line": 12, "change": "Trims PORT."}]}}`
 
 	if _, err := runTool(t, fake, dir, with(env, "GEMINI_REPLY", reply), "post"); err != nil {
@@ -431,7 +431,7 @@ func TestPostFailsWhenGeminiSkipsACriterion(t *testing.T) {
 	fake := &fakeGitHub{}
 	dir, env := readyToPost(t, fake)
 	withStory(t, dir)
-	reply := `{"summary": "Fine.", ` + testChecklist + `, "story": {"criteria": [{"id": "AC1", "verdict": "satisfied", "reason": "r"}]}}`
+	reply := `{"summary": "Fine.", ` + testChecklist + `, "story": {"criteria": [{"id": "AC1", "quote": "Lists each criterion.", "verdict": "satisfied", "reason": "r"}]}}`
 
 	_, err := runTool(t, fake, dir, with(env, "GEMINI_REPLY", reply), "post")
 	if err == nil || !strings.Contains(err.Error(), "omits the acceptance criteria AC2") {

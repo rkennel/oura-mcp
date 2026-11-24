@@ -418,7 +418,8 @@ func reseed(t *testing.T, dir seededCaseAt) {
 
 func storyReplyWith(ac1, ac2, outside string) string {
 	return `{"summary": "s", "checklist": [{"rule": "gemini-rule", "verdict": "pass", "reason": "Fine."}], "story": {"criteria": [` +
-		`{"id": "AC1", "verdict": "` + ac1 + `", "reason": "r"}, {"id": "AC2", "verdict": "` + ac2 + `", "reason": "r"}], "outside": [` + outside + `]}}`
+		`{"id": "AC1", "quote": "it returns err", "verdict": "` + ac1 + `", "reason": "r"}, ` +
+		`{"id": "AC2", "quote": "it logs nothing", "verdict": "` + ac2 + `", "reason": "r"}], "outside": [` + outside + `]}}`
 }
 
 func TestSeedWritesTheStoryWithoutTheExpectations(t *testing.T) {
