@@ -58,10 +58,18 @@ runs:
         # The review step uploads the gemini-output artifact; a second upload
         # under that name would fail the job.
         upload_artifacts: 'false'
+        # .gemini-review/ is in .gitignore so local runs leave no untracked
+        # files, and Gemini's read_file refuses ignored files unless told
+        # otherwise. The review step sets the same.
         settings: |-
           {
             "model": {
               "maxSessionTurns": 50
+            },
+            "context": {
+              "fileFiltering": {
+                "respectGitIgnore": false
+              }
             },
             "tools": {
               "core": ["read_file", "list_directory", "glob", "grep_search"]
@@ -115,10 +123,18 @@ runs:
         github_pr_number: ${{ inputs.pr_number }}
         # Gemini's stdout, stderr and telemetry (which tools it called).
         upload_artifacts: ${{ inputs.upload_artifacts }}
+        # .gemini-review/ is in .gitignore, and read_file refuses ignored
+        # files by default: without respectGitIgnore false Gemini cannot read
+        # the pull request, the facts or the story, and makes them up.
         settings: |-
           {
             "model": {
               "maxSessionTurns": 50
+            },
+            "context": {
+              "fileFiltering": {
+                "respectGitIgnore": false
+              }
             },
             "telemetry": {
               "enabled": true,

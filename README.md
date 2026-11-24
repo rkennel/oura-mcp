@@ -279,6 +279,9 @@ files whose package has no test change to `.gemini-review/facts.md`. The
 prompt tells Gemini to cite those figures for the coverage and
 test-driven rules rather than estimate them. A failing stage does not stop
 the review: it is a fact for it. The end-to-end tests are left to CI.
+`.gemini-review/` is in `.gitignore`, and Gemini CLI's `read_file` refuses
+ignored files by default, so the action turns `respectGitIgnore` off for
+both Gemini steps; without it Gemini cannot read these files and guesses.
 
 Every rule in `GEMINI.md` has a stable ID, such as `constant-time-compare`.
 Besides testing, structure and security basics, the rules cover where this
