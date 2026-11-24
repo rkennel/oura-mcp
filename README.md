@@ -11,6 +11,7 @@ and deployed as a container on Google Cloud Run.
 | `internal/app` | Configuration and server lifecycle. |
 | `internal/httpapi` | HTTP routes and handlers. |
 | `internal/mcpserver` | The MCP server: its name and version, its tools, and the HTTP transport. |
+| `internal/oura` | The Oura API client and the rules that turn Oura's sleep data into a summary per wake-up date. |
 | `api-explore/` | `.http` files that show how to call each API, for the REST Client extension. |
 | `e2e/` | End-to-end tests and their Docker Compose environment. |
 | `e2e/fakeoura` | A fake Oura API that the end-to-end environment runs as its own container. |
@@ -108,6 +109,37 @@ For now it offers one tool, `ping`, which takes no arguments and replies
 `pong`, so you can check that a client reaches the server before any Oura
 data is involved. `api-explore/mcp.http` has a request for each MCP call.
 
+## Reading Oura
+
+`internal/oura` reads two of Oura's collections for a range of wake-up
+dates and summarizes each date. The MCP tool that exposes it comes in a
+later story.
+
+| Value | Where it comes from |
+|---|---|
+| Sleep score | The `score` of the date's `daily_sleep` document. |
+| Lowest heart rate | The `lowest_heart_rate` of the date's main sleep in the `sleep` collection. |
+| Average HRV | The `average_hrv` of the date's main sleep, rounded to a whole number. |
+
+The main sleep is the date's `long_sleep`, or the longest of them when a
+night is broken into several. Naps and short sleeps (`late_nap`, `sleep`,
+`rest`) never count, even on a date with no long sleep. Anything Oura does
+not have yet, such as a night the ring has not synced or a score Oura has
+not worked out, is reported as `no data yet` and never estimated.
+
+The client takes the access token from a `TokenSource`, so token storage
+and refresh stay out of it. It follows `next_token` through every page and
+gives up on a read after 15 seconds with an error that names the
+collection. An error status from Oura comes back as a `StatusError` with the
+status and Oura's explanation.
+
+Oura's API reference does not say whether `end_date` is included, and users
+report that the `sleep` collection leaves the `end_date` day out while
+`daily_sleep` keeps it. The client therefore asks for a day either side of
+the range and keeps only the documents whose `day` is in it, which gives the
+same answer either way. This still needs checking against real Oura data in
+the production rollout.
+
 ## Configuration
 
 | Variable | Required | Purpose |
@@ -188,6 +220,10 @@ deployed. It serves the parts of Oura the server uses, the way Oura does:
 | `GET /v2/usercollection/daily_sleep` | The seeded `daily_sleep` documents whose `day` is from `start_date` to `end_date`, both included, as `{"data": [...], "next_token": null}`. Needs `Authorization: Bearer` with a current access token. Both dates are required (Oura would default them), so a client that relies on Oura's defaults fails loudly. |
 | `GET /v2/usercollection/sleep` | The same for the `sleep` collection. |
 
+Oura's API reference does not say whether `end_date` is included; the fake
+includes it for both collections. The server's client does not depend on
+either answer (see [Reading Oura](#reading-oura)).
+
 Tests set the fake up through its control endpoints, all `POST`. They have
 no authentication, which is why the fake is published on loopback only:
 
@@ -265,5 +301,6 @@ workflow, the review job is skipped and that job's summary says why.
 The server answers `GET /health`, serves MCP at `/mcp` with a placeholder
 `ping` tool, and requires the API key on everything except the health
 check. `scripts/deploy.sh` deploys it to Cloud Run. The end-to-end
-environment runs it beside a fake Oura API. Oura access arrives in later
-pull requests; see the KAN project in Jira.
+environment runs it beside a fake Oura API. `internal/oura` reads and
+summarizes Oura's sleep data; the token storage and the tool that exposes the
+summary arrive in later pull requests; see the KAN project in Jira.
