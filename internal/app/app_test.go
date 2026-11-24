@@ -306,3 +306,19 @@ func TestRunNeverLogsTheKey(t *testing.T) {
 		t.Errorf("the logs contain the API key:\n%s", logs.String())
 	}
 }
+
+func TestRunLogsTheOuraBaseURLItUses(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	listen := func(string, string) (net.Listener, error) { return fakeListener{}, nil }
+	serve := func(context.Context, net.Listener, http.Handler, *slog.Logger) error { return nil }
+	getenv := validEnv(map[string]string{ouraBaseURLVariable: "http://fakeoura:8081"})
+
+	if err := run(context.Background(), getenv, logger, listen, unusedHandler, serve); err != nil {
+		t.Fatalf("run returned an error: %v", err)
+	}
+
+	if !strings.Contains(logs.String(), `"base_url":"http://fakeoura:8081"`) {
+		t.Errorf("the logs do not name the Oura base URL:\n%s", logs.String())
+	}
+}

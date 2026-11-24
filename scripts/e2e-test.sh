@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Stage 3 of CI: build the production image, run it, and run the end-to-end
-# tests against it. The container is always stopped afterwards; set
+# Stage 3 of CI: build the production image, run it beside the fake Oura
+# API, and run the end-to-end tests against them. The container is always stopped afterwards; set
 # KEEP_E2E_UP=1 to leave it running for debugging.
 # COMPOSE_FILE may add override files; CI uses it to enable layer caching.
 # The server uses CONNECTOR_API_KEY from your shell or .env (see
@@ -39,9 +39,10 @@ step "Building and starting the end-to-end environment"
 "${COMPOSE[@]}" up --build --detach
 
 # -count=1 disables the test cache: these tests depend on a running server,
-# which Go cannot see has changed.
+# which Go cannot see has changed. Only ./e2e itself: the fake Oura API's
+# own unit tests run in the unit test stage.
 step "End-to-end tests"
-go test -tags e2e -count=1 ./e2e/...
+go test -tags e2e -count=1 ./e2e
 
 # The tests above sent the key, wrong keys and no key. The server must not
 # have written the key to its logs. The logs are read in full before the
@@ -50,6 +51,15 @@ step "The server never logs the API key"
 server_logs="$("${COMPOSE[@]}" logs --no-log-prefix)"
 if grep -qF -- "$CONNECTOR_API_KEY" <<<"$server_logs"; then
     printf 'The server logs contain CONNECTOR_API_KEY\n' >&2
+    exit 1
+fi
+
+# The tests above cannot see where the server reaches Oura, so its startup
+# log is checked instead: it must use the fake, never the real API.
+step "The server reaches Oura through the fake"
+server_logs="$("${COMPOSE[@]}" logs --no-log-prefix server)"
+if ! grep -qF '"base_url":"http://fakeoura:8081"' <<<"$server_logs"; then
+    printf 'The server did not log the fake Oura API as its Oura base URL:\n%s\n' "$server_logs" >&2
     exit 1
 fi
 

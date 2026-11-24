@@ -1,0 +1,9 @@
+# Used instead of the repository's .dockerignore when building
+# e2e/fakeoura/Dockerfile, which needs e2e/fakeoura, and that file leaves
+# out e2e/. Everything is left out except what the build copies.
+*
+!go.mod
+!go.sum
+!internal
+!e2e/fakeoura
+e2e/fakeoura/**/*_test.go

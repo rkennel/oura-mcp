@@ -13,6 +13,7 @@ and deployed as a container on Google Cloud Run.
 | `internal/mcpserver` | The MCP server: its name and version, its tools, and the HTTP transport. |
 | `api-explore/` | `.http` files that show how to call each API, for the REST Client extension. |
 | `e2e/` | End-to-end tests and their Docker Compose environment. |
+| `e2e/fakeoura` | A fake Oura API that the end-to-end environment runs as its own container. |
 | `scripts/` | The CI stages, runnable locally, the scripts that run the server on your machine, and the deploy. |
 | `docs/` | Guides, such as the Google Cloud setup and deploy. |
 | `tools/gemini-review` | Fetches a pull request for the Gemini review, picks the model, and posts Gemini's reply. Its own Go module. |
@@ -33,9 +34,9 @@ minute or two. `govulncheck` needs to reach https://vuln.go.dev.
 | Command | What it does |
 |---|---|
 | `scripts/static-analysis.sh` | `gofmt` check, `go vet`, a `go.mod` tidiness check, `golangci-lint` and `govulncheck` |
-| `scripts/unit-test.sh` | Unit tests with the race detector, failing below 85% coverage |
+| `scripts/unit-test.sh` | Unit tests with the race detector, failing below 85% coverage (of `internal/`, and of `e2e/fakeoura` on its own) |
 | `scripts/deploy-test.sh` | Tests `scripts/deploy.sh` against stand-ins for `gcloud`, `docker` and `curl` |
-| `scripts/e2e-test.sh` | Builds the production image, runs it, and runs the end-to-end tests against it |
+| `scripts/e2e-test.sh` | Builds the production image, runs it beside the fake Oura API, and runs the end-to-end tests against them |
 | `scripts/server-scripts-test.sh` | Tests the start and stop scripts below against a throwaway copy of the repository |
 | `scripts/local-ci.sh` | All of the above in order, stopping at the first failure |
 | `scripts/start-server.sh` | Builds the server and starts it in the background with the settings in `.env` |
@@ -113,6 +114,7 @@ data is involved. `api-explore/mcp.http` has a request for each MCP call.
 |---|---|---|
 | `CONNECTOR_API_KEY` | Yes | The key every request except `GET /health` must send in its `x-api-key` header. In production it comes from Secret Manager. Never log it. |
 | `PORT` | No | The port to listen on; 8080 by default. Cloud Run sets it. |
+| `OURA_API_BASE_URL` | No | Where the server reaches the Oura API, for both its token endpoint and its data; `https://api.ouraring.com` by default. The end-to-end environment points it at the fake Oura API. The server logs it at startup and refuses to start if it is not an `http` or `https` URL with a host and no credentials, query or fragment. |
 
 ### Setting them locally
 
@@ -169,6 +171,37 @@ key.
 - **End-to-end tests** live in `e2e/` behind the `e2e` build tag and drive the
   production container image over HTTP. `cmd/server` is a few lines of wiring
   and is covered here rather than by unit tests.
+- **External systems are faked**, never called, in the end-to-end
+  environment. See [The fake Oura API](#the-fake-oura-api).
+
+## The fake Oura API
+
+`e2e/fakeoura` is a small Go service that stands in for Oura. The
+end-to-end environment (`e2e/compose.yaml`) runs it as its own container at
+`http://fakeoura:8081` inside the environment, and publishes it on
+`http://127.0.0.1:8081` for the tests. It holds no real data and is never
+deployed. It serves the parts of Oura the server uses, the way Oura does:
+
+| Endpoint | What it does |
+|---|---|
+| `POST /oauth/token` | Exchanges a refresh token (`grant_type=refresh_token`) for a new pair. Like Oura, each refresh token works **once**: presenting it again gets `400 invalid_grant`. The client must authenticate as the `OURA_CLIENT_ID` and `OURA_CLIENT_SECRET` the fake runs with, in the form or with HTTP Basic. |
+| `GET /v2/usercollection/daily_sleep` | The seeded `daily_sleep` documents whose `day` is from `start_date` to `end_date`, both included, as `{"data": [...], "next_token": null}`. Needs `Authorization: Bearer` with a current access token. Both dates are required (Oura would default them), so a client that relies on Oura's defaults fails loudly. |
+| `GET /v2/usercollection/sleep` | The same for the `sleep` collection. |
+
+Tests set the fake up through its control endpoints, all `POST`. They have
+no authentication, which is why the fake is published on loopback only:
+
+| Control | What it does |
+|---|---|
+| `/_control/reset` | Forgets every token, document and pending failure. Start each test with it. |
+| `/_control/seed` | Replaces the documents of each collection in the body, such as `{"sleep": [{"day": "2026-11-01", "average_hrv": 42}]}`. Documents are served exactly as seeded; each needs a `day`. |
+| `/_control/tokens` | Issues a token pair, as completing the Oura login would, and returns it in the token endpoint's form. |
+| `/_control/expire-access-tokens` | Makes every access token issued so far invalid. Refresh tokens still work. |
+| `/_control/failures` | Makes the next requests to an Oura endpoint fail, such as `{"endpoint": "/v2/usercollection/sleep", "status": 503, "count": 2}`. `count` is 1 when left out, and 0 clears it. |
+
+`e2e/fakeoura_test.go` has helpers for these that new end-to-end tests can
+reuse. `api-explore/fakeoura.http` shows each call; run
+`KEEP_E2E_UP=1 scripts/e2e-test.sh` to keep the fake up to try them.
 
 ## Continuous integration
 
@@ -231,5 +264,6 @@ workflow, the review job is skipped and that job's summary says why.
 
 The server answers `GET /health`, serves MCP at `/mcp` with a placeholder
 `ping` tool, and requires the API key on everything except the health
-check. `scripts/deploy.sh` deploys it to Cloud Run. Oura access arrives in later pull requests; see the KAN project in
-Jira.
+check. `scripts/deploy.sh` deploys it to Cloud Run. The end-to-end
+environment runs it beside a fake Oura API. Oura access arrives in later
+pull requests; see the KAN project in Jira.

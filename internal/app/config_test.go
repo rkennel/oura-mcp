@@ -97,3 +97,58 @@ func TestLoadConfigRejectsAKeyWithSurroundingWhitespace(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadConfigDefaultsTheOuraBaseURLToTheRealAPI(t *testing.T) {
+	config, err := LoadConfig(validEnv(nil))
+
+	if err != nil {
+		t.Fatalf("LoadConfig returned an error: %v", err)
+	}
+	if got, want := config.OuraBaseURL, "https://api.ouraring.com"; got != want {
+		t.Errorf("OuraBaseURL = %q, want %q", got, want)
+	}
+}
+
+func TestLoadConfigReadsTheOuraBaseURL(t *testing.T) {
+	for value, want := range map[string]string{
+		"http://fakeoura:8081":         "http://fakeoura:8081",
+		"http://fakeoura:8081/":        "http://fakeoura:8081",
+		"https://oura.example/prefix/": "https://oura.example/prefix",
+	} {
+		t.Run(value, func(t *testing.T) {
+			config, err := LoadConfig(validEnv(map[string]string{ouraBaseURLVariable: value}))
+
+			if err != nil {
+				t.Fatalf("LoadConfig returned an error: %v", err)
+			}
+			if config.OuraBaseURL != want {
+				t.Errorf("OuraBaseURL = %q, want %q", config.OuraBaseURL, want)
+			}
+		})
+	}
+}
+
+func TestLoadConfigRejectsAnOuraBaseURLThatCannotBeABase(t *testing.T) {
+	//nolint:gosec // G101: made-up credentials in a URL the test expects to be rejected.
+	for name, value := range map[string]string{
+		"no scheme":      "api.ouraring.com",
+		"other scheme":   "ftp://api.ouraring.com",
+		"no host":        "https://",
+		"credentials":    "https://user:hunter2@api.ouraring.com",
+		"query":          "https://api.ouraring.com?x=1",
+		"empty query":    "https://api.ouraring.com?",
+		"fragment":       "https://api.ouraring.com#top",
+		"does not parse": "https://api.ouraring.com/%zz",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := LoadConfig(validEnv(map[string]string{ouraBaseURLVariable: value}))
+
+			if err == nil {
+				t.Fatalf("LoadConfig accepted %q", value)
+			}
+			if !strings.Contains(err.Error(), ouraBaseURLVariable) || strings.Contains(err.Error(), "hunter2") {
+				t.Errorf("error %q should name %s and never repeat the value", err, ouraBaseURLVariable)
+			}
+		})
+	}
+}

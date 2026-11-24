@@ -66,6 +66,9 @@ func run(ctx context.Context, getenv func(string) string, logger *slog.Logger, l
 	if err != nil {
 		return err
 	}
+	// The log shows which Oura a server talks to: the real API in
+	// production, the fake in the end-to-end environment.
+	logger.Info("oura api", "base_url", config.OuraBaseURL)
 
 	listener, err := listen("tcp", config.Addr)
 	if err != nil {
