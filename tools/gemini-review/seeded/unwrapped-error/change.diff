@@ -1,0 +1,28 @@
+diff --git a/internal/oura/client.go b/internal/oura/client.go
+index 5a4ce3e..5f1ba53 100644
+--- a/internal/oura/client.go
++++ b/internal/oura/client.go
+@@ -170,7 +170,7 @@ func readPage[T dated](ctx context.Context, c *Client, collection string, days D
+ func (c *Client) newRequest(ctx context.Context, collection string, days DayRange, nextToken string) (*http.Request, error) {
+ 	token, err := c.tokens.AccessToken(ctx)
+ 	if err != nil {
+-		return nil, fmt.Errorf("oura %s: get the access token: %w", collection, err)
++		return nil, err
+ 	}
+ 
+ 	start, end := days.queryBounds()
+diff --git a/internal/oura/client_test.go b/internal/oura/client_test.go
+index a188350..274b956 100644
+--- a/internal/oura/client_test.go
++++ b/internal/oura/client_test.go
+@@ -360,8 +360,8 @@ func TestClientSurfacesAFailureToGetTheAccessToken(t *testing.T) {
+ 
+ 	_, err := client.Sleep(t.Context(), mustDays(t, "2026-11-01", "2026-11-01"))
+ 
+-	if !errors.Is(err, noToken) || !strings.Contains(err.Error(), "access token") {
+-		t.Errorf("error = %v, want it to say the access token failed and wrap %v", err, noToken)
++	if !errors.Is(err, noToken) {
++		t.Errorf("error = %v, want %v", err, noToken)
+ 	}
+ 	if len(oura.requests) != 0 {
+ 		t.Errorf("sent %d requests without a token, want none", len(oura.requests))

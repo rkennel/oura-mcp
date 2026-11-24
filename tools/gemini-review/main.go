@@ -1,27 +1,40 @@
 // Command gemini-review is the deterministic half of the Gemini pull request
-// review workflow. Gemini only reads; this tool does the GitHub calls and
-// picks the model.
+// review workflow. Gemini only reads; this tool does the GitHub calls, picks
+// the model, gathers the facts Gemini cannot work out and checks the
+// mechanical rules of GEMINI.md.
 //
-//	gemini-review origin   says whether the pull request comes from a branch
-//	                       in this repository, and so whether the review runs
-//	gemini-review prepare  writes the pull request and its line-numbered diff
-//	                       for Gemini to read
-//	gemini-review route    applies the routing file's rules to the diff and
-//	                       says whether the triage model should look too
-//	gemini-review decide   adds the triage model's verdict and names the
-//	                       model that reviews
-//	gemini-review post     posts Gemini's reply as a review, or fails
+//	gemini-review origin    says whether the pull request comes from a branch
+//	                        in this repository, and so whether the review runs
+//	gemini-review prepare   writes the pull request and its line-numbered diff
+//	                        for Gemini to read
+//	gemini-review standards checks the mechanical rules of GEMINI.md against
+//	                        the repository and a diff, and fails on a breach
+//	gemini-review facts     writes the facts CI worked out for Gemini to read
+//	gemini-review route     applies the routing file's rules to the diff and
+//	                        says whether the triage model should look too
+//	gemini-review decide    adds the triage model's verdict and names the
+//	                        model that reviews
+//	gemini-review prompt    writes the review prompt, with GEMINI.md's rules
+//	gemini-review post      posts Gemini's reply as a review, or fails
+//	gemini-review cases     lists the seeded cases, for a matrix of jobs
+//	gemini-review seed      writes a seeded case as prepare writes a pull
+//	                        request
+//	gemini-review evaluate  checks the review of a seeded case against what
+//	                        the case expects, and fails if it missed
 //
-// Settings come from the environment. All commands use REVIEW_DIR, the
-// directory they share, except origin, which runs before anything is
-// prepared. origin, prepare and post use GITHUB_TOKEN, GITHUB_REPOSITORY,
-// GITHUB_API_URL (default https://api.github.com) and PR_NUMBER. route reads
-// the routing file named by ROUTING_CONFIG. decide reads TRIAGE_REPLY and
-// TRIAGE_OUTPUT when triage ran, and post reads GEMINI_REPLY and
-// GEMINI_OUTPUT: the model's answer and Gemini CLI's JSON output, which shows
-// the model that answered. route and decide write step outputs to
-// GITHUB_OUTPUT, and decide and post add to GITHUB_STEP_SUMMARY. origin
-// writes to GITHUB_OUTPUT, and to GITHUB_STEP_SUMMARY when it skips.
+// Settings come from the environment. All commands but origin, standards,
+// prompt and cases use REVIEW_DIR, the directory they share. origin, prepare
+// and post use GITHUB_TOKEN, GITHUB_REPOSITORY, GITHUB_API_URL (default
+// https://api.github.com) and PR_NUMBER. standards reads DIFF_FILE and the
+// repository at REPO_ROOT (default the working directory), and writes its
+// result to STANDARDS_RESULT when set. facts reads COVERAGE_MIN (default
+// 85). route reads the routing file named by ROUTING_CONFIG. decide reads
+// TRIAGE_REPLY and TRIAGE_OUTPUT when triage ran, and post and evaluate read
+// GEMINI_REPLY and GEMINI_OUTPUT: the model's answer and Gemini CLI's JSON
+// output, which shows the model that answered. prompt, post and evaluate
+// read the rules from STANDARDS_FILE (default GEMINI.md). cases reads
+// SEEDED_DIR, and seed and evaluate read the case at SEEDED_CASE. Commands write step outputs to
+// GITHUB_OUTPUT and add to GITHUB_STEP_SUMMARY where Actions sets them.
 package main
 
 import (
@@ -49,7 +62,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	if err := run(ctx, os.Args[1:], os.Getenv, http.DefaultClient, os.Stdout); err != nil {
-		fmt.Fprintf(os.Stderr, "::error title=Gemini review::%v\n", err)
+		fmt.Fprintf(os.Stderr, "::error title=%s::%v\n", strings.Join(append([]string{"gemini-review"}, os.Args[1:]...), " "), err)
 		cancel()
 		os.Exit(1)
 	}
@@ -63,7 +76,7 @@ type config struct {
 
 func run(ctx context.Context, args []string, getenv func(string) string, httpClient *http.Client, out io.Writer) error {
 	if len(args) != 1 {
-		return errors.New("usage: gemini-review origin|prepare|route|decide|post")
+		return errors.New("usage: gemini-review " + strings.Join(commandNames, "|"))
 	}
 	switch args[0] {
 	case "origin":
@@ -80,19 +93,65 @@ func run(ctx context.Context, args []string, getenv func(string) string, httpCli
 		if args[0] == "prepare" {
 			return prepare(ctx, cfg, out)
 		}
-		return post(ctx, cfg, reviewInputs{reply: getenv("GEMINI_REPLY"), cliOutput: getenv("GEMINI_OUTPUT"), summary: getenv("GITHUB_STEP_SUMMARY")}, out)
-	case "route", "decide":
-		steps, err := loadStepConfig(getenv)
-		if err != nil {
-			return err
-		}
-		if args[0] == "route" {
-			return routeCommand(steps, getenv("ROUTING_CONFIG"), out)
-		}
-		return decideCommand(steps, getenv("TRIAGE_REPLY"), getenv("TRIAGE_OUTPUT"), out)
+		return post(ctx, cfg, reviewInputs{
+			reply: getenv("GEMINI_REPLY"), cliOutput: getenv("GEMINI_OUTPUT"),
+			standardsFile: standardsFile(getenv), summary: getenv("GITHUB_STEP_SUMMARY"),
+		}, out)
+	case "standards":
+		return standardsCommand(withDefault(getenv("REPO_ROOT"), "."), getenv("DIFF_FILE"), getenv("STANDARDS_RESULT"), out)
+	case "prompt":
+		return promptCommand(standardsFile(getenv), getenv("GITHUB_OUTPUT"), out)
+	case "cases":
+		return casesCommand(getenv("SEEDED_DIR"), getenv("GITHUB_OUTPUT"), out)
 	default:
-		return fmt.Errorf("unknown command %q: want origin, prepare, route, decide or post", args[0])
+		return runStepCommand(args[0], getenv, out)
 	}
+}
+
+var commandNames = []string{"origin", "prepare", "standards", "facts", "route", "decide", "prompt", "post", "cases", "seed", "evaluate"}
+
+// runStepCommand runs the commands that work only in REVIEW_DIR.
+func runStepCommand(name string, getenv func(string) string, out io.Writer) error {
+	var run func(stepConfig) error
+	switch name {
+	case "facts":
+		run = func(steps stepConfig) error { return factsCommand(steps.reviewDir, getenv("COVERAGE_MIN"), out) }
+	case "route":
+		run = func(steps stepConfig) error { return routeCommand(steps, getenv("ROUTING_CONFIG"), out) }
+	case "decide":
+		run = func(steps stepConfig) error {
+			return decideCommand(steps, getenv("TRIAGE_REPLY"), getenv("TRIAGE_OUTPUT"), out)
+		}
+	case "seed":
+		run = func(steps stepConfig) error {
+			return seedCommand(getenv("SEEDED_CASE"), steps.reviewDir, getenv("GITHUB_REPOSITORY"), out)
+		}
+	case "evaluate":
+		run = func(steps stepConfig) error {
+			return evaluateCommand(getenv("SEEDED_CASE"), steps.reviewDir, evaluateInputs{
+				reply: getenv("GEMINI_REPLY"), cliOutput: getenv("GEMINI_OUTPUT"),
+				standardsFile: standardsFile(getenv), summary: steps.summary,
+			}, out)
+		}
+	default:
+		return fmt.Errorf("unknown command %q: want one of %s", name, strings.Join(commandNames, ", "))
+	}
+	steps, err := loadStepConfig(getenv)
+	if err != nil {
+		return err
+	}
+	return run(steps)
+}
+
+func standardsFile(getenv func(string) string) string {
+	return withDefault(getenv("STANDARDS_FILE"), "GEMINI.md")
+}
+
+func withDefault(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 // loadConfig is loadClientConfig plus the directory prepare and post share.
@@ -184,15 +243,21 @@ func pullRequestDocument(repo string, pr pullRequest, files []fileDiff) string {
 
 // reviewInputs are what post needs from the review step and the runner.
 type reviewInputs struct {
-	reply     string // the model's answer
-	cliOutput string // Gemini CLI's JSON output file
-	summary   string // the job summary file; empty outside Actions
+	reply         string // the model's answer
+	cliOutput     string // Gemini CLI's JSON output file
+	standardsFile string // GEMINI.md, whose rules the checklist must cover
+	summary       string // the job summary file; empty outside Actions
 }
 
-// post checks Gemini's reply and posts it as one review. Any failure is an
+// post checks Gemini's reply, joins it with the standards check's result
+// and posts it as one review. Any failure is an
 // error, so the workflow's check is green only when a review was posted.
 func post(ctx context.Context, cfg config, inputs reviewInputs, out io.Writer) error {
-	review, err := parseGeminiReview(inputs.reply)
+	reply, err := parseGeminiReview(inputs.reply)
+	if err != nil {
+		return err
+	}
+	review, err := assembleFromDir(reply, inputs.standardsFile, cfg.reviewDir)
 	if err != nil {
 		return err
 	}
@@ -230,4 +295,18 @@ func post(ctx context.Context, cfg config, inputs reviewInputs, out io.Writer) e
 	}
 	fmt.Fprintf(out, "Posted the %s review with %d line comments: %s\n", decision.Model, len(request.Comments), url)
 	return appendFile(inputs.summary, fmt.Sprintf("### Gemini review posted\n\n%s\n\n%d line comments: %s\n", note, len(request.Comments), url))
+}
+
+// assembleFromDir joins Gemini's reply with the rules in standardsFile and
+// the standards check's result that the facts step left in reviewDir.
+func assembleFromDir(reply geminiReview, standardsFile, reviewDir string) (assembledReview, error) {
+	rules, err := loadRules(standardsFile)
+	if err != nil {
+		return assembledReview{}, err
+	}
+	standards, err := readStandardsResult(reviewDir)
+	if err != nil {
+		return assembledReview{}, err
+	}
+	return assembleReview(reply, rules, standards)
 }

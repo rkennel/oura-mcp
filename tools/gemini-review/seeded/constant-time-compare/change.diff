@@ -1,0 +1,46 @@
+diff --git a/internal/httpapi/apikey.go b/internal/httpapi/apikey.go
+index 28ab7c3..d40b469 100644
+--- a/internal/httpapi/apikey.go
++++ b/internal/httpapi/apikey.go
+@@ -1,10 +1,6 @@
+ package httpapi
+ 
+-import (
+-	"crypto/sha256"
+-	"crypto/subtle"
+-	"net/http"
+-)
++import "net/http"
+ 
+ // apiKeyHeader is the request header that carries the connector API key.
+ const apiKeyHeader = "x-api-key"
+@@ -14,9 +10,8 @@ const apiKeyHeader = "x-api-key"
+ // wrong one, gets the same 401 response, so a caller cannot tell the two
+ // apart. Neither key is ever logged or echoed.
+ func RequireAPIKey(apiKey string, next http.Handler) http.Handler {
+-	expected := sha256.Sum256([]byte(apiKey))
+ 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+-		if !keyMatches(r.Header.Get(apiKeyHeader), expected) {
++		if !keyMatches(r.Header.Get(apiKeyHeader), apiKey) {
+ 			rejectUnauthorized(w)
+ 			return
+ 		}
+@@ -24,14 +19,10 @@ func RequireAPIKey(apiKey string, next http.Handler) http.Handler {
+ 	})
+ }
+ 
+-// keyMatches reports whether presented is the key whose digest is expected.
+-// Comparing fixed-length digests in constant time means the time taken
+-// reveals neither the key's content nor its length. An empty key never
+-// matches, even if the expected key is empty too.
+-func keyMatches(presented string, expected [sha256.Size]byte) bool {
+-	digest := sha256.Sum256([]byte(presented))
+-	matches := subtle.ConstantTimeCompare(digest[:], expected[:]) == 1
+-	return matches && presented != ""
++// keyMatches reports whether presented is the expected key. An empty key
++// never matches, even if the expected key is empty too.
++func keyMatches(presented, expected string) bool {
++	return presented != "" && presented == expected
+ }
+ 
+ func rejectUnauthorized(w http.ResponseWriter) {

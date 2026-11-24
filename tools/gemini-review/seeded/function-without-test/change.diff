@@ -1,0 +1,18 @@
+diff --git a/internal/oura/days.go b/internal/oura/days.go
+index 35d4264..f6f3700 100644
+--- a/internal/oura/days.go
++++ b/internal/oura/days.go
+@@ -37,6 +37,13 @@ func (r DayRange) Days() []string {
+ 	return days
+ }
+ 
++// Covers reports whether t's calendar date, in its own location, is one of
++// the range's days.
++func (r DayRange) Covers(t time.Time) bool {
++	day := dateOf(t)
++	return !day.Before(r.first) && !day.After(r.last)
++}
++
+ // contains reports whether day, in YYYY-MM-DD form, is in the range.
+ // Days in that form sort as strings in date order.
+ func (r DayRange) contains(day string) bool {

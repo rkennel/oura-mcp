@@ -7,7 +7,9 @@
   "high_risk_line_threshold": 400,
   "critical_paths": [
     {"pattern": ".github/workflows/**", "why": "CI and review workflows, which run with repository secrets"},
+    {"pattern": ".github/actions/**", "why": "the shared review steps, which run with the Gemini key"},
     {"pattern": ".github/gemini-review.json", "why": "these routing rules"},
+    {"pattern": "scripts/check-standards.sh", "why": "the check the review takes the mechanical rules' verdicts from"},
     {"pattern": "tools/gemini-review/**", "why": "the review tool, which posts with a GitHub token"},
     {"pattern": "GEMINI.md", "why": "the review standards"},
     {"pattern": "cmd/server/**", "why": "the MCP server entry point"},

@@ -1,0 +1,52 @@
+diff --git a/internal/httpapi/handler.go b/internal/httpapi/handler.go
+index b9365c6..4f880a4 100644
+--- a/internal/httpapi/handler.go
++++ b/internal/httpapi/handler.go
+@@ -22,9 +22,17 @@ func NewHandler(apiKey string, mcp http.Handler) http.Handler {
+ func newProtectedRoutes(mcp http.Handler) http.Handler {
+ 	mux := http.NewServeMux()
+ 	mux.Handle(MCPPath, mcp)
++	mux.HandleFunc("GET /status", handleStatus)
+ 	return mux
+ }
+ 
++// handleStatus tells a caller with the key that the server is up and that
++// its key works, which the open health check cannot tell it.
++func handleStatus(w http.ResponseWriter, _ *http.Request) {
++	w.Header().Set("Content-Type", "application/json")
++	_, _ = w.Write([]byte(`{"status":"ok"}` + "\n"))
++}
++
+ // handleHealth reports that the process is up. It deliberately reveals
+ // nothing else, because it is reachable without credentials.
+ func handleHealth(w http.ResponseWriter, _ *http.Request) {
+diff --git a/internal/httpapi/handler_test.go b/internal/httpapi/handler_test.go
+index 0044477..b2ebb0a 100644
+--- a/internal/httpapi/handler_test.go
++++ b/internal/httpapi/handler_test.go
+@@ -46,6 +46,25 @@ func TestHealthReportsOKWithoutAKey(t *testing.T) {
+ 	}
+ }
+ 
++func TestStatusAnswersACallerWithTheKey(t *testing.T) {
++	recorder := serve(t, http.MethodGet, "/status", testAPIKey)
++
++	if recorder.Code != http.StatusOK {
++		t.Errorf("status = %d, want %d", recorder.Code, http.StatusOK)
++	}
++	if got, want := recorder.Body.String(), `{"status":"ok"}`+"\n"; got != want {
++		t.Errorf("body = %q, want %q", got, want)
++	}
++}
++
++func TestStatusNeedsTheKey(t *testing.T) {
++	recorder := serve(t, http.MethodGet, "/status", "")
++
++	if recorder.Code != http.StatusUnauthorized {
++		t.Errorf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
++	}
++}
++
+ func TestOtherMethodsOnHealthNeedTheKey(t *testing.T) {
+ 	recorder := serve(t, http.MethodPost, "/health", "")
+ 

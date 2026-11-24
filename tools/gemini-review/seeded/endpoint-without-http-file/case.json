@@ -1,0 +1,8 @@
+{
+  "title": "Add a status endpoint behind the API key",
+  "description": "GET /status lets a client check that the server is up and that its API key works, which the open health check cannot. Unit tests cover a call with the key and one without.",
+  "breaks": "api-explore-file",
+  "path": "internal/httpapi/handler.go",
+  "from": 25,
+  "to": 25
+}

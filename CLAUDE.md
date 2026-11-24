@@ -19,6 +19,11 @@ them so the review finds nothing to flag:
   scripts on their own and say in the pull request which stage you could not
   run. `tools/gemini-review` is its own Go module: test it with
   `go test -race ./...` from that directory.
+- **Changing the review itself?** After a change to the review prompt
+  (`tools/gemini-review/prompt.go`), the routing or model IDs in
+  `.github/gemini-review.json` or the Gemini CLI pin, ask Ryan to run the
+  seeded-defect workflow (README, "Proving the review catches defects"): it
+  spends Gemini API calls.
 - **Try changes against a running server.** `scripts/start-server.sh` builds
   and starts it in the background with `.env` (log in `.run/server.log`), and
   `scripts/stop-server.sh` stops it. Stop it when you are done.

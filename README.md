@@ -17,7 +17,9 @@ and deployed as a container on Google Cloud Run.
 | `e2e/fakeoura` | A fake Oura API that the end-to-end environment runs as its own container. |
 | `scripts/` | The CI stages, runnable locally, the scripts that run the server on your machine, and the deploy. |
 | `docs/` | Guides, such as the Google Cloud setup and deploy. |
-| `tools/gemini-review` | Fetches a pull request for the Gemini review, picks the model, and posts Gemini's reply. Its own Go module. |
+| `tools/gemini-review` | Fetches a pull request for the Gemini review, picks the model, works out the facts it reviews with, checks the mechanical rules of `GEMINI.md`, and posts Gemini's reply. Its own Go module. |
+| `tools/gemini-review/seeded` | Seeded-defect cases: known changes that each break one rule of `GEMINI.md`, or none, for proving the review catches them. |
+| `.github/actions/gemini-review` | The review steps (routing, triage, prompt, Gemini) shared by the pull request review and the seeded-defect run. |
 | `Dockerfile` | The production image. |
 
 ## Prerequisites
@@ -35,7 +37,10 @@ minute or two. `govulncheck` needs to reach https://vuln.go.dev.
 | Command | What it does |
 |---|---|
 | `scripts/static-analysis.sh` | `gofmt` check, `go vet`, a `go.mod` tidiness check, `golangci-lint` and `govulncheck` |
+| `scripts/check-standards.sh [BASE]` | Checks the mechanical rules of `GEMINI.md` against your change from `BASE` (default: where your branch left `origin/main`), untracked files included, and names each breach and its rule |
 | `scripts/unit-test.sh` | Unit tests with the race detector, failing below 85% coverage (of `internal/`, and of `e2e/fakeoura` on its own) |
+| `scripts/tools-test.sh` | Tests `tools/gemini-review`, including a check that every seeded case still fits `GEMINI.md` and its change |
+| `scripts/check-standards-test.sh` | Tests `scripts/check-standards.sh` against throwaway copies with a change that breaks each rule |
 | `scripts/deploy-test.sh` | Tests `scripts/deploy.sh` against stand-ins for `gcloud`, `docker` and `curl` |
 | `scripts/e2e-test.sh` | Builds the production image, runs it beside the fake Oura API, and runs the end-to-end tests against them |
 | `scripts/server-scripts-test.sh` | Tests the start and stop scripts below against a throwaway copy of the repository |
@@ -242,9 +247,10 @@ reuse. `api-explore/fakeoura.http` shows each call; run
 ## Continuous integration
 
 Every pull request runs three stages, each only if the previous one passes:
-static analysis, unit tests with the coverage gate, then end-to-end tests.
-The unit test stage also tests the deploy script, and the end-to-end stage
-the local start and stop scripts.
+static analysis with the standards check, unit tests with the coverage gate,
+then end-to-end tests. The unit test stage also tests the review tool, the
+standards check and the deploy script, and the end-to-end stage the local
+start and stop scripts.
 
 Versions are pinned so a run today matches a run next month: the Go
 toolchain in `go.mod`, the linters in `scripts/static-analysis.sh`, the base
@@ -261,6 +267,51 @@ and the repository with read-only tools and gets no GitHub token;
 `tools/gemini-review` does the GitHub calls. A failed run means no review
 was posted. Gemini's raw output is kept as the run's `gemini-output`
 artifact. The review standards are in `GEMINI.md`.
+
+### What the review is given, and what it must say
+
+Gemini can read files but cannot run anything, so the review job works out
+what it would otherwise guess. Before Gemini starts, `scripts/review-facts.sh`
+runs the static analysis, the unit tests and `scripts/check-standards.sh` on
+the pull request, and `gemini-review facts` writes how each ended, the
+statement coverage of `internal/` by package, and the changed `internal/`
+files whose package has no test change to `.gemini-review/facts.md`. The
+prompt tells Gemini to cite those figures for the coverage and
+test-driven rules rather than estimate them. A failing stage does not stop
+the review: it is a fact for it. The end-to-end tests are left to CI.
+
+Every rule in `GEMINI.md` has a stable ID, such as `constant-time-compare`.
+Gemini must give each rule a verdict (pass, fail or not applicable) with a
+one-line reason; a reply that leaves a rule out fails the run and posts
+nothing. Rules marked "Checked by `scripts/check-standards.sh`" are
+mechanical: the script decides them, the same way in CI and in the review,
+and its findings are posted as line comments with the review. The review
+ends with the checklist as a table, and says "No issues found." only when no
+rule failed and nothing was commented on.
+
+### Proving the review catches defects
+
+`.github/workflows/gemini-review-eval.yml` reviews each case in
+`tools/gemini-review/seeded` with the same routing, models, CLI and prompt as
+a pull request, posts nothing, and fails if the review missed what the case
+expects: the broken rule failed, a comment on the lines that break it, the
+computed coverage cited where the case is about coverage, and no comment or
+failed rule on the clean case. Each job's summary shows the review it got.
+
+It spends Gemini API calls, so it runs by hand. Run it **after changing the
+review prompt (`tools/gemini-review/prompt.go`), the routing or model IDs in
+`.github/gemini-review.json`, or the Gemini CLI pin in
+`.github/actions/gemini-review`**: from the Actions tab, pick "Gemini review
+seeded defects", choose the branch with the change, and run it, optionally
+naming one case. GitHub offers the button only once the workflow is on
+`main`.
+
+A case is a folder with `case.json` (the title and description Gemini sees,
+the rule it breaks, and the file and lines a comment must land on) and
+`change.diff`, a patch against `main`. `scripts/tools-test.sh` fails when a
+case names a rule `GEMINI.md` no longer has, expects lines its change does
+not show, or has a patch that no longer applies; regenerate the patch when
+you change the code it touches.
 
 ### Which model reviews
 

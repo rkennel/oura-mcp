@@ -35,6 +35,19 @@ type diffLine struct {
 	newLine int
 }
 
+// changes returns the added and removed lines of the file's diff.
+func (f fileDiff) changes() []diffLine {
+	var lines []diffLine
+	for _, h := range f.hunks {
+		for _, line := range h.lines {
+			if line.kind != ' ' {
+				lines = append(lines, line)
+			}
+		}
+	}
+	return lines
+}
+
 // anchor is a place on a pull request's diff where GitHub accepts a review
 // comment.
 type anchor struct {

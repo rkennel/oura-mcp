@@ -1,0 +1,8 @@
+{
+  "title": "Log the configuration at start-up",
+  "description": "When the service fails to start on Cloud Run, the log says too little to tell which setting was wrong. This logs the configuration the server loaded, next to the Oura base URL it already logs.",
+  "breaks": "no-secret-leaks",
+  "path": "internal/app/app.go",
+  "from": 74,
+  "to": 74
+}

@@ -1,0 +1,29 @@
+diff --git a/README.md b/README.md
+index aa0934e..e25a935 100644
+--- a/README.md
++++ b/README.md
+@@ -122,7 +122,7 @@ later story.
+ | Average HRV | The `average_hrv` of the date's main sleep, rounded to a whole number. |
+ 
+ The main sleep is the date's `long_sleep`, or the longest of them when a
+-night is broken into several. Naps and short sleeps (`late_nap`, `sleep`,
++night is broken into several, so a night split by a wake-up still counts once. Naps and short sleeps (`late_nap`, `sleep`,
+ `rest`) never count, even on a date with no long sleep. Anything Oura does
+ not have yet, such as a night the ring has not synced or a score Oura has
+ not worked out, is reported as `no data yet` and never estimated.
+diff --git a/internal/oura/days.go b/internal/oura/days.go
+index 35d4264..8539114 100644
+--- a/internal/oura/days.go
++++ b/internal/oura/days.go
+@@ -52,8 +52,9 @@ func (r DayRange) queryBounds() (start, end string) {
+ 	return r.first.AddDate(0, 0, -1).Format(dayLayout), r.last.AddDate(0, 0, 1).Format(dayLayout)
+ }
+ 
+-// dateOf returns t's calendar date as midnight UTC, so that adding days
+-// never crosses a daylight saving change.
++// dateOf returns t's calendar date, read in t's own location, as midnight
++// UTC. Days then always last 24 hours, so adding days never crosses a
++// daylight saving change.
+ func dateOf(t time.Time) time.Time {
+ 	year, month, day := t.Date()
+ 	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)

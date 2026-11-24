@@ -1,0 +1,137 @@
+name: Gemini review seeded defects
+
+# Proves the Gemini review still catches what it must. Each seeded case in
+# tools/gemini-review/seeded is a known change: most break one rule of
+# GEMINI.md, and one breaks none. A job per case applies the change to a
+# checkout of the branch the run was started from, works out the facts as
+# the pull request review does, reviews it with the same routing, models,
+# CLI and prompt (.github/actions/gemini-review), and checks the reply
+# against what the case expects. Nothing is posted anywhere. The run is red
+# when any case is missed: a rule not failed, no comment on the case's lines,
+# a coverage verdict that does not cite the computed figure, or a comment or
+# failed rule on the clean case. Each job's summary shows the review it got.
+#
+# It spends Gemini API calls, so it runs by hand: after a change to the
+# review prompt, the routing in .github/gemini-review.json, the model IDs or
+# the Gemini CLI pin. Start it from the branch with the change (Actions, this
+# workflow, Run workflow), or name one case to run just that one.
+on:
+  workflow_dispatch:
+    inputs:
+      case:
+        description: 'One seeded case to run, by its folder name; empty runs them all'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gemini-review-eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cases:
+    name: List the seeded cases
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      cases: ${{ steps.cases.outputs.cases }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: tools/gemini-review/go.mod
+          cache: false
+
+      # The tool's tests include one that checks every case against
+      # GEMINI.md and its own change, so a stale case fails here for free.
+      - name: Test the review tool and its seeded cases
+        working-directory: tools/gemini-review
+        run: go test -race ./...
+
+      - name: List the cases to run
+        id: cases
+        working-directory: tools/gemini-review
+        env:
+          SEEDED_DIR: seeded
+          ONLY: ${{ inputs.case }}
+        run: |
+          if [ -z "$ONLY" ]; then
+            go run . cases
+            exit 0
+          fi
+          if ! [[ "$ONLY" =~ ^[a-z0-9-]+$ ]] || [ ! -f "seeded/$ONLY/case.json" ]; then
+            printf '::error::No seeded case named %s.\n' "$ONLY"
+            exit 1
+          fi
+          printf 'cases=["%s"]\n' "$ONLY" >>"$GITHUB_OUTPUT"
+
+  evaluate:
+    name: Review ${{ matrix.case }}
+    needs: cases
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      # Every case runs, so one miss does not hide another.
+      fail-fast: false
+      # A few at a time, to stay inside the Gemini API's rate limits.
+      max-parallel: 3
+      matrix:
+        case: ${{ fromJSON(needs.cases.outputs.cases) }}
+    env:
+      REVIEW_DIR: ${{ github.workspace }}/.gemini-review
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            scripts/static-analysis.sh
+
+      - name: Build the review tool
+        working-directory: tools/gemini-review
+        run: go build -o "${RUNNER_TEMP}/gemini-review" .
+
+      # The cases say what the review must find, and Gemini can read the
+      # whole checkout, so they move out of it before Gemini runs. Only the
+      # title, description and change reach .gemini-review/.
+      - name: Set the case aside and apply its change
+        env:
+          CASE: ${{ matrix.case }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/seeded"
+          cp -R "tools/gemini-review/seeded/${CASE}" "${RUNNER_TEMP}/seeded/"
+          rm -rf tools/gemini-review/seeded
+          git apply "${RUNNER_TEMP}/seeded/${CASE}/change.diff"
+          printf 'SEEDED_CASE=%s\n' "${RUNNER_TEMP}/seeded/${CASE}" >>"$GITHUB_ENV"
+
+      - name: Write the case as a pull request
+        run: '"${RUNNER_TEMP}/gemini-review" seed'
+
+      - name: Work out the facts Gemini reviews with
+        run: |
+          scripts/review-facts.sh
+          "${RUNNER_TEMP}/gemini-review" facts
+
+      - name: Review with Gemini
+        id: review
+        uses: ./.github/actions/gemini-review
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          tool: ${{ runner.temp }}/gemini-review
+          # Matrix jobs would clash over the gemini-output artifact's name.
+          upload_artifacts: 'false'
+
+      - name: Check the review caught the defect
+        run: '"${RUNNER_TEMP}/gemini-review" evaluate'
+        env:
+          GEMINI_REPLY: ${{ steps.review.outputs.reply }}
+          GEMINI_OUTPUT: ${{ steps.review.outputs.cli_output }}

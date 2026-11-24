@@ -1,0 +1,6 @@
+{
+  "title": "Remove the Oura client's unit tests",
+  "description": "The client's unit tests duplicate what the end-to-end tests against the fake Oura API already check, and they are the slowest unit tests in the repository. This removes them.",
+  "breaks": "coverage",
+  "cites_coverage": true
+}

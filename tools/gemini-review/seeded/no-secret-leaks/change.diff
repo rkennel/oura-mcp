@@ -1,0 +1,14 @@
+diff --git a/internal/app/app.go b/internal/app/app.go
+index 4dad78a..b485240 100644
+--- a/internal/app/app.go
++++ b/internal/app/app.go
+@@ -69,6 +69,9 @@ func run(ctx context.Context, getenv func(string) string, logger *slog.Logger, l
+ 	// The log shows which Oura a server talks to: the real API in
+ 	// production, the fake in the end-to-end environment.
+ 	logger.Info("oura api", "base_url", config.OuraBaseURL)
++	// Log the whole configuration, so a start-up problem on Cloud Run can be
++	// diagnosed from the log alone.
++	logger.Info("configuration", "addr", config.Addr, "api_key", config.APIKey)
+ 
+ 	listener, err := listen("tcp", config.Addr)
+ 	if err != nil {
