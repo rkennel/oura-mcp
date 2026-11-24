@@ -1,5 +1,5 @@
-# Production-representative environment for end-to-end tests.
-# Fakes for external systems (such as the Oura API) are added here as services.
+# Production-representative environment for end-to-end tests: the server's
+# production image, with fakes standing in for external systems.
 services:
   server:
     build:
@@ -13,6 +13,26 @@ services:
       PORT: "8080"
       # scripts/e2e-test.sh generates a throwaway key for each run.
       CONNECTOR_API_KEY: ${CONNECTOR_API_KEY:?set CONNECTOR_API_KEY, or run scripts/e2e-test.sh}
+      # The server reaches Oura through the fake, never the real API.
+      OURA_API_BASE_URL: http://fakeoura:8081
+    depends_on:
+      - fakeoura
     ports:
       # Loopback only, so the server is not reachable from the local network.
       - "127.0.0.1:8080:8080"
+
+  # The fake Oura API (e2e/fakeoura). Tests set it up through its /_control/
+  # endpoints, which have no authentication, so it too is published on
+  # loopback only.
+  fakeoura:
+    build:
+      context: ..
+      dockerfile: e2e/fakeoura/Dockerfile
+    environment:
+      PORT: "8081"
+      # The OAuth client the fake accepts. Made-up values for this
+      # environment only; no real Oura client uses them.
+      OURA_CLIENT_ID: e2e-client
+      OURA_CLIENT_SECRET: e2e-client-secret
+    ports:
+      - "127.0.0.1:8081:8081"

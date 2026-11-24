@@ -29,6 +29,15 @@ func baseURL() string {
 	return "http://127.0.0.1:8080"
 }
 
+// fakeOuraURL is the address of the fake Oura API the server under test
+// uses. Override with E2E_FAKE_OURA_URL.
+func fakeOuraURL() string {
+	if url := os.Getenv("E2E_FAKE_OURA_URL"); url != "" {
+		return url
+	}
+	return "http://127.0.0.1:8081"
+}
+
 // apiKey is the connector API key the server under test was started with.
 // scripts/e2e-test.sh generates one for each run.
 func apiKey() string {
@@ -38,16 +47,22 @@ func apiKey() string {
 // get sends a GET request for path to the server under test, with key in the
 // x-api-key header unless key is empty.
 func get(ctx context.Context, path, key string) (*http.Response, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL()+path, nil)
+	return getURL(ctx, baseURL()+path, key)
+}
+
+// getURL sends a GET request for url, with key in the x-api-key header
+// unless key is empty.
+func getURL(ctx context.Context, url, key string) (*http.Response, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("build request for %s: %w", path, err)
+		return nil, fmt.Errorf("build request for %s: %w", url, err)
 	}
 	if key != "" {
 		request.Header.Set("x-api-key", key)
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("GET %s: %w", path, err)
+		return nil, fmt.Errorf("GET %s: %w", url, err)
 	}
 	return response, nil
 }
@@ -77,28 +92,32 @@ func closeBody(t *testing.T, response *http.Response) {
 	}
 }
 
-// TestMain waits for the server to accept requests before running any test,
-// so a slow container start is not reported as a test failure.
+// TestMain waits for the server and the fake Oura API to accept requests
+// before running any test, so a slow container start is not reported as a
+// test failure.
 func TestMain(m *testing.M) {
 	if apiKey() == "" {
 		fmt.Fprintln(os.Stderr,
 			"CONNECTOR_API_KEY is not set: set it to the key the server was started with, or run these tests with scripts/e2e-test.sh")
 		os.Exit(1)
 	}
-	if err := waitUntilHealthy(); err != nil {
-		fmt.Fprintf(os.Stderr,
-			"could not reach the server at %s: %v\nIs it running? Start it and run these tests with scripts/e2e-test.sh\n",
-			baseURL(), err)
-		os.Exit(1)
+	for name, url := range map[string]string{"the server": baseURL(), "the fake Oura API": fakeOuraURL()} {
+		if err := waitUntilHealthy(url); err != nil {
+			fmt.Fprintf(os.Stderr,
+				"could not reach %s at %s: %v\nIs it running? Start it and run these tests with scripts/e2e-test.sh\n",
+				name, url, err)
+			os.Exit(1)
+		}
 	}
 	os.Exit(m.Run())
 }
 
-func waitUntilHealthy() error {
+// waitUntilHealthy waits until GET /health at base answers OK.
+func waitUntilHealthy(base string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), startupTimeout)
 	defer cancel()
 	for {
-		err := checkHealth(ctx)
+		err := checkHealth(ctx, base)
 		if err == nil {
 			return nil
 		}
@@ -110,9 +129,10 @@ func waitUntilHealthy() error {
 	}
 }
 
-// checkHealth makes one health check and returns an error unless it passes.
-func checkHealth(ctx context.Context) error {
-	response, err := get(ctx, "/health", "")
+// checkHealth makes one health check of base and returns an error unless it
+// passes.
+func checkHealth(ctx context.Context, base string) error {
+	response, err := getURL(ctx, base+"/health", "")
 	if err != nil {
 		return err
 	}

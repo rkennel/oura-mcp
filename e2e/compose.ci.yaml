@@ -7,3 +7,9 @@ services:
         - type=gha,scope=e2e-server
       cache_to:
         - type=gha,scope=e2e-server,mode=max
+  fakeoura:
+    build:
+      cache_from:
+        - type=gha,scope=e2e-fakeoura
+      cache_to:
+        - type=gha,scope=e2e-fakeoura,mode=max

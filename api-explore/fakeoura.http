@@ -1,0 +1,75 @@
+# Run with the "REST Client" extension (humao.rest-client):
+# click "Send Request" above a request, or press Ctrl+Alt+R.
+#
+# These call the fake Oura API from e2e/fakeoura, not the server and never
+# the real Oura. Start the end-to-end environment and keep it up first:
+#
+#   KEEP_E2E_UP=1 scripts/e2e-test.sh
+#
+# The client ID and secret are the made-up ones e2e/compose.yaml gives the
+# fake. Send the requests in order: later ones use the tokens that "issue"
+# and "refresh" return.
+
+@fakeOuraUrl = http://localhost:8081
+@clientId = e2e-client
+@clientSecret = e2e-client-secret
+
+### Health check
+GET {{fakeOuraUrl}}/health
+
+### Reset: forget every token, document and pending failure
+POST {{fakeOuraUrl}}/_control/reset
+
+### Seed sleep data, served exactly as given
+POST {{fakeOuraUrl}}/_control/seed
+Content-Type: application/json
+
+{
+  "daily_sleep": [{ "day": "2026-11-01", "score": 82 }],
+  "sleep": [{ "day": "2026-11-01", "type": "long_sleep", "average_hrv": 42, "lowest_heart_rate": 51 }]
+}
+
+### Issue a token pair, as completing the Oura login would
+# @name issue
+POST {{fakeOuraUrl}}/_control/tokens
+
+### Daily sleep for a day range, with the access token
+GET {{fakeOuraUrl}}/v2/usercollection/daily_sleep?start_date=2026-11-01&end_date=2026-11-01
+Authorization: Bearer {{issue.response.body.access_token}}
+
+### Sleep periods for a day range, with the access token
+GET {{fakeOuraUrl}}/v2/usercollection/sleep?start_date=2026-11-01&end_date=2026-11-01
+Authorization: Bearer {{issue.response.body.access_token}}
+
+### Without an access token: 401
+GET {{fakeOuraUrl}}/v2/usercollection/sleep?start_date=2026-11-01&end_date=2026-11-01
+
+### Refresh: a new token pair for the issued refresh token
+# @name refresh
+POST {{fakeOuraUrl}}/oauth/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token&refresh_token={{issue.response.body.refresh_token}}&client_id={{clientId}}&client_secret={{clientSecret}}
+
+### The same refresh token again: 400 invalid_grant, because each works once
+POST {{fakeOuraUrl}}/oauth/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token&refresh_token={{issue.response.body.refresh_token}}&client_id={{clientId}}&client_secret={{clientSecret}}
+
+### Make the next sleep request fail with 503
+POST {{fakeOuraUrl}}/_control/failures
+Content-Type: application/json
+
+{ "endpoint": "/v2/usercollection/sleep", "status": 503, "count": 1 }
+
+### Sleep with the refreshed access token: 503 once, then 200 when sent again
+GET {{fakeOuraUrl}}/v2/usercollection/sleep?start_date=2026-11-01&end_date=2026-11-01
+Authorization: Bearer {{refresh.response.body.access_token}}
+
+### Expire every access token issued so far
+POST {{fakeOuraUrl}}/_control/expire-access-tokens
+
+### Sleep with the now expired access token: 401
+GET {{fakeOuraUrl}}/v2/usercollection/sleep?start_date=2026-11-01&end_date=2026-11-01
+Authorization: Bearer {{refresh.response.body.access_token}}
