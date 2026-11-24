@@ -1,0 +1,8 @@
+{
+  "title": "Let callers ask whether a day range covers a time",
+  "description": "Adds DayRange.Covers, so that the code that maps Oura's documents to wake-up dates in a later story can check a timestamp against the range it asked for.",
+  "breaks": "test-driven",
+  "path": "internal/oura/days.go",
+  "from": 42,
+  "to": 45
+}

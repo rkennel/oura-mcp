@@ -1,0 +1,8 @@
+{
+  "title": "Return the token source's error unchanged",
+  "description": "The token source already says what went wrong, so the client now returns its error as it is instead of adding to the message. The test checks that the error is the token source's.",
+  "breaks": "idiomatic-go",
+  "path": "internal/oura/client.go",
+  "from": 173,
+  "to": 173
+}

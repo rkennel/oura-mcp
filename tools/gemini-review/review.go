@@ -8,8 +8,9 @@ import (
 
 // geminiReview is the JSON object the review prompt asks Gemini to return.
 type geminiReview struct {
-	Summary  string          `json:"summary"`
-	Comments []geminiComment `json:"comments"`
+	Summary   string           `json:"summary"`
+	Comments  []geminiComment  `json:"comments"`
+	Checklist []checklistEntry `json:"checklist"`
 }
 
 type geminiComment struct {
@@ -35,7 +36,7 @@ type reviewComment struct {
 	Body string `json:"body"`
 }
 
-const noFindings = "**No issues found.** Gemini has no comments on this change."
+const noFindings = "**No issues found.** Neither Gemini nor the standards check has comments on this change."
 
 // parseGeminiReview extracts the review from Gemini's reply. The reply should
 // be the bare JSON object, but a model may wrap it in a code fence or a
@@ -56,11 +57,11 @@ func parseGeminiReview(reply string) (geminiReview, error) {
 	return review, nil
 }
 
-// buildReview turns Gemini's review into a GitHub review on commitID. A
+// buildReview turns the review into a GitHub review on commitID. A
 // comment whose line is not on the diff cannot be posted as a line comment,
 // so it moves into the review's body instead of being dropped. modelNote says
 // which model reviewed and why.
-func buildReview(review geminiReview, commitID, modelNote string, onDiff map[anchor]bool) reviewRequest {
+func buildReview(review assembledReview, commitID, modelNote string, onDiff map[anchor]bool) reviewRequest {
 	request := reviewRequest{CommitID: commitID, Event: "COMMENT"}
 	var unplaced []geminiComment
 	for _, comment := range review.Comments {
@@ -85,7 +86,7 @@ func buildReview(review geminiReview, commitID, modelNote string, onDiff map[anc
 
 // withoutLineComments is the fallback when GitHub rejects the line comments:
 // the same review with every comment in its body.
-func withoutLineComments(review geminiReview, commitID, modelNote string) reviewRequest {
+func withoutLineComments(review assembledReview, commitID, modelNote string) reviewRequest {
 	return reviewRequest{
 		CommitID: commitID,
 		Event:    "COMMENT",
@@ -94,11 +95,12 @@ func withoutLineComments(review geminiReview, commitID, modelNote string) review
 }
 
 // reviewBody is Gemini's summary, then any comments that could not go on a
-// line, then which model reviewed and why. A review with no comments at all
-// says so, so a quiet review cannot be mistaken for one that never ran.
-func reviewBody(review geminiReview, unplaced []geminiComment, commitID, modelNote string) string {
+// line, then the verdict on every rule, then which model reviewed and why. A
+// review that found nothing says so, so a quiet review cannot be mistaken
+// for one that never ran.
+func reviewBody(review assembledReview, unplaced []geminiComment, commitID, modelNote string) string {
 	var b strings.Builder
-	if len(review.Comments) == 0 {
+	if !review.hasFindings() {
 		b.WriteString(noFindings + "\n\n")
 	}
 	b.WriteString(strings.TrimSpace(review.Summary))
@@ -109,6 +111,9 @@ func reviewBody(review geminiReview, unplaced []geminiComment, commitID, modelNo
 			fmt.Fprintf(&b, "- `%s` line %d: %s\n", comment.Path, comment.Line, withSeverity(comment))
 		}
 		b.WriteString("\n")
+	}
+	if len(review.Checklist) > 0 {
+		b.WriteString(checklistTable(review.Checklist) + "\n")
 	}
 	if modelNote != "" {
 		b.WriteString(modelNote + "\n\n")

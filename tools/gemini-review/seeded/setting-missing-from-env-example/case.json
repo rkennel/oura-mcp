@@ -1,0 +1,8 @@
+{
+  "title": "Read the log level from LOG_LEVEL",
+  "description": "Adds a LOG_LEVEL setting, INFO by default, so that DEBUG logging can be switched on when diagnosing a problem. The README's configuration table documents it. Wiring it into the logger follows in the next pull request.",
+  "breaks": "settings-documented",
+  "path": "internal/app/config.go",
+  "from": 85,
+  "to": 85
+}

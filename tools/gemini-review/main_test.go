@@ -113,9 +113,37 @@ func readyToPost(t *testing.T, fake *fakeGitHub) (string, map[string]string) {
 	if err := writeRouting(dir, decision); err != nil {
 		t.Fatal(err)
 	}
+	writeStandardsResult(t, dir, nil)
 	return dir, map[string]string{
 		"GEMINI_OUTPUT":       cliOutputFile(t, map[string][2]int{testModel: {3, 0}}),
 		"GITHUB_STEP_SUMMARY": filepath.Join(t.TempDir(), "summary.md"),
+		"STANDARDS_FILE":      testStandardsFile(t),
+	}
+}
+
+// testStandards is a GEMINI.md with one rule for Gemini and one for the
+// standards check, and testChecklist is a checklist that covers it.
+const (
+	testStandards = "# Standards\n\n## Rules\n\n- `gemini-rule` **Judged by Gemini.** Text.\n" +
+		"- `script-rule` **Checked by script.** *Checked by `scripts/check-standards.sh`.*\n"
+	testChecklist = `"checklist": [{"rule": "gemini-rule", "verdict": "pass", "reason": "Kept."}]`
+)
+
+func testStandardsFile(t *testing.T) string {
+	t.Helper()
+	name := filepath.Join(t.TempDir(), "GEMINI.md")
+	if err := os.WriteFile(name, []byte(testStandards), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return name
+}
+
+// writeStandardsResult saves a standards check of script-rule that found
+// findings, as the facts step would.
+func writeStandardsResult(t *testing.T, dir string, findings []finding) {
+	t.Helper()
+	if err := writeJSON(filepath.Join(dir, standardsResultFile), standardsResult{Rules: []string{"script-rule"}, Findings: findings}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -179,7 +207,7 @@ func TestPrepareWritesThePullRequestForGemini(t *testing.T) {
 func TestPostPostsLineCommentsOnTheHeadCommit(t *testing.T) {
 	fake := &fakeGitHub{}
 	dir, env := readyToPost(t, fake)
-	reply := `{"summary": "One issue.", "comments": [{"path": "internal/app/config.go", "line": 12, "side": "RIGHT", "severity": "low", "body": "Comment says what, not why."}]}`
+	reply := `{"summary": "One issue.", "comments": [{"path": "internal/app/config.go", "line": 12, "side": "RIGHT", "severity": "low", "body": "Comment says what, not why."}], ` + testChecklist + `}`
 
 	out, err := runTool(t, fake, dir, with(env, "GEMINI_REPLY", reply), "post")
 	if err != nil {
@@ -214,7 +242,7 @@ func TestPostFailsWhenTheRoutedModelDidNotAnswer(t *testing.T) {
 			dir, env := readyToPost(t, fake)
 			env = with(env, "GEMINI_OUTPUT", cliOutputFile(t, output))
 
-			_, err := runTool(t, fake, dir, with(env, "GEMINI_REPLY", `{"summary": "Fine."}`), "post")
+			_, err := runTool(t, fake, dir, with(env, "GEMINI_REPLY", `{"summary": "Fine.", `+testChecklist+`}`), "post")
 			if err == nil || !strings.Contains(err.Error(), "did not answer") {
 				t.Errorf("err = %v, want the routed model reported missing", err)
 			}
@@ -228,7 +256,7 @@ func TestPostFailsWhenTheRoutedModelDidNotAnswer(t *testing.T) {
 func TestPostFallsBackToTheBodyWhenGitHubRejectsTheLines(t *testing.T) {
 	fake := &fakeGitHub{rejectLineCount: 1}
 	dir, env := readyToPost(t, fake)
-	reply := `{"summary": "One issue.", "comments": [{"path": "internal/app/config.go", "line": 12, "body": "Problem."}]}`
+	reply := `{"summary": "One issue.", "comments": [{"path": "internal/app/config.go", "line": 12, "body": "Problem."}], ` + testChecklist + `}`
 
 	out, err := runTool(t, fake, dir, with(env, "GEMINI_REPLY", reply), "post")
 	if err != nil {
@@ -249,9 +277,10 @@ func TestPostFailsWhenNoReviewCanBePosted(t *testing.T) {
 		fake  *fakeGitHub
 		reply string
 	}{
-		"unusable reply":    {&fakeGitHub{}, "Sorry, I hit an error."},
-		"GitHub refuses":    {&fakeGitHub{failStatus: http.StatusInternalServerError}, `{"summary": "Fine."}`},
-		"fallback rejected": {&fakeGitHub{failStatus: http.StatusUnprocessableEntity}, `{"summary": "x", "comments": [{"path": "internal/app/config.go", "line": 12, "body": "b"}]}`},
+		"unusable reply":         {&fakeGitHub{}, "Sorry, I hit an error."},
+		"GitHub refuses":         {&fakeGitHub{failStatus: http.StatusInternalServerError}, `{"summary": "Fine.", ` + testChecklist + `}`},
+		"fallback rejected":      {&fakeGitHub{failStatus: http.StatusUnprocessableEntity}, `{"summary": "x", "comments": [{"path": "internal/app/config.go", "line": 12, "body": "b"}], ` + testChecklist + `}`},
+		"checklist omits a rule": {&fakeGitHub{}, `{"summary": "Fine.", "checklist": []}`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir, env := readyToPost(t, tc.fake)

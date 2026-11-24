@@ -193,13 +193,7 @@ func (r routing) withTriage(verdict triageVerdict) routing {
 func changedLines(files []fileDiff) int {
 	count := 0
 	for _, file := range files {
-		for _, h := range file.hunks {
-			for _, line := range h.lines {
-				if line.kind != ' ' {
-					count++
-				}
-			}
-		}
+		count += len(file.changes())
 	}
 	return count
 }

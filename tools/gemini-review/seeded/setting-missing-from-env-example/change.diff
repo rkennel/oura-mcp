@@ -1,0 +1,122 @@
+diff --git a/README.md b/README.md
+index aa0934e..0bb0bb0 100644
+--- a/README.md
++++ b/README.md
+@@ -147,6 +147,7 @@ the production rollout.
+ | `CONNECTOR_API_KEY` | Yes | The key every request except `GET /health` must send in its `x-api-key` header. In production it comes from Secret Manager. Never log it. |
+ | `PORT` | No | The port to listen on; 8080 by default. Cloud Run sets it. |
+ | `OURA_API_BASE_URL` | No | Where the server reaches the Oura API, for both its token endpoint and its data; `https://api.ouraring.com` by default. The end-to-end environment points it at the fake Oura API. The server logs it at startup and refuses to start if it is not an `http` or `https` URL with a host and no credentials, query or fragment. |
++| `LOG_LEVEL` | No | The least severe level the server logs: `DEBUG`, `INFO` (the default), `WARN` or `ERROR`. |
+ 
+ ### Setting them locally
+ 
+diff --git a/internal/app/config.go b/internal/app/config.go
+index 7bcf4d2..bf9e691 100644
+--- a/internal/app/config.go
++++ b/internal/app/config.go
+@@ -3,6 +3,7 @@ package app
+ import (
+ 	"errors"
+ 	"fmt"
++	"log/slog"
+ 	"net/url"
+ 	"strconv"
+ 	"strings"
+@@ -20,6 +21,10 @@ const (
+ 	// where the server reaches Oura; the end-to-end tests point it at a fake.
+ 	ouraBaseURLVariable = "OURA_API_BASE_URL"
+ 
++	// logLevelVariable names the environment variable that sets how much
++	// the server logs: DEBUG, INFO, WARN or ERROR.
++	logLevelVariable = "LOG_LEVEL"
++
+ 	// defaultOuraBaseURL is the real Oura API, which serves both the OAuth
+ 	// token endpoint and the data endpoints.
+ 	defaultOuraBaseURL = "https://api.ouraring.com"
+@@ -33,6 +38,7 @@ var (
+ 	errAPIKeyWhitespace = errors.New(apiKeyVariable +
+ 		" has leading or trailing whitespace, so no request could match it" +
+ 		" (a secret saved with a trailing newline is the usual cause)")
++	errLogLevel = errors.New(logLevelVariable + " must be DEBUG, INFO, WARN or ERROR")
+ 	// The message leaves the value out, in case it holds credentials.
+ 	errOuraBaseURL = errors.New(ouraBaseURLVariable +
+ 		" must be an http or https URL with a host, and no credentials, query or fragment")
+@@ -48,6 +54,8 @@ type Config struct {
+ 	// OuraBaseURL is where the server reaches the Oura API, with no
+ 	// trailing slash, such as "https://api.ouraring.com".
+ 	OuraBaseURL string
++	// LogLevel is the least severe level the server logs.
++	LogLevel slog.Level
+ }
+ 
+ // LoadConfig builds a Config from environment variables, looked up through
+@@ -65,7 +73,24 @@ func LoadConfig(getenv func(string) string) (Config, error) {
+ 	if err != nil {
+ 		return Config{}, err
+ 	}
+-	return Config{Addr: addr, APIKey: apiKey, OuraBaseURL: ouraBaseURL}, nil
++	logLevel, err := loadLogLevel(getenv)
++	if err != nil {
++		return Config{}, err
++	}
++	return Config{Addr: addr, APIKey: apiKey, OuraBaseURL: ouraBaseURL, LogLevel: logLevel}, nil
++}
++
++// loadLogLevel reads the log level, INFO when it is not set.
++func loadLogLevel(getenv func(string) string) (slog.Level, error) {
++	raw := getenv(logLevelVariable)
++	if raw == "" {
++		return slog.LevelInfo, nil
++	}
++	var level slog.Level
++	if err := level.UnmarshalText([]byte(raw)); err != nil {
++		return 0, errLogLevel
++	}
++	return level, nil
+ }
+ 
+ func loadAddr(getenv func(string) string) (string, error) {
+diff --git a/internal/app/config_test.go b/internal/app/config_test.go
+index 4a535be..c12cd6a 100644
+--- a/internal/app/config_test.go
++++ b/internal/app/config_test.go
+@@ -1,6 +1,8 @@
+ package app
+ 
+ import (
++	"errors"
++	"log/slog"
+ 	"strings"
+ 	"testing"
+ )
+@@ -152,3 +154,30 @@ func TestLoadConfigRejectsAnOuraBaseURLThatCannotBeABase(t *testing.T) {
+ 		})
+ 	}
+ }
++
++func TestLoadConfigDefaultsTheLogLevelToInfo(t *testing.T) {
++	config, err := LoadConfig(validEnv(nil))
++	if err != nil {
++		t.Fatalf("LoadConfig: %v", err)
++	}
++	if config.LogLevel != slog.LevelInfo {
++		t.Errorf("LogLevel = %v, want INFO", config.LogLevel)
++	}
++}
++
++func TestLoadConfigReadsTheLogLevel(t *testing.T) {
++	config, err := LoadConfig(validEnv(map[string]string{logLevelVariable: "DEBUG"}))
++	if err != nil {
++		t.Fatalf("LoadConfig: %v", err)
++	}
++	if config.LogLevel != slog.LevelDebug {
++		t.Errorf("LogLevel = %v, want DEBUG", config.LogLevel)
++	}
++}
++
++func TestLoadConfigRejectsAnUnknownLogLevel(t *testing.T) {
++	_, err := LoadConfig(validEnv(map[string]string{logLevelVariable: "LOUD"}))
++	if !errors.Is(err, errLogLevel) {
++		t.Errorf("err = %v, want %v", err, errLogLevel)
++	}
++}

@@ -1,0 +1,5 @@
+{
+  "title": "Clarify how sleep dates are handled",
+  "description": "Two documentation fixes from reading the Oura code: the comment on dateOf now says which location the date is read in, and the README says why only the longest long sleep counts.",
+  "breaks": ""
+}

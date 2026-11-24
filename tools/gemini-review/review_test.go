@@ -47,7 +47,7 @@ func TestBuildReviewPlacesCommentsOnTheDiffAndMovesTheRestToTheBody(t *testing.T
 		{"a.go", sideRight, 3}: true,
 		{"a.go", sideLeft, 5}:  true,
 	}
-	review := geminiReview{
+	review := assembledReview{
 		Summary: "One bug, one nit.",
 		Comments: []geminiComment{
 			{Path: "a.go", Line: 3, Severity: "high", Body: "Nil dereference."},
@@ -89,7 +89,7 @@ func TestBuildReviewPlacesCommentsOnTheDiffAndMovesTheRestToTheBody(t *testing.T
 }
 
 func TestBuildReviewWithNoCommentsSaysNothingWasFound(t *testing.T) {
-	got := buildReview(geminiReview{Summary: "A clean refactor."}, "abc", "", nil)
+	got := buildReview(assembledReview{Summary: "A clean refactor."}, "abc", "", nil)
 
 	if len(got.Comments) != 0 {
 		t.Errorf("comments = %+v, want none", got.Comments)
@@ -103,7 +103,7 @@ func TestBuildReviewWithNoCommentsSaysNothingWasFound(t *testing.T) {
 }
 
 func TestWithoutLineCommentsPutsEveryCommentInTheBody(t *testing.T) {
-	review := geminiReview{
+	review := assembledReview{
 		Summary:  "Two issues.",
 		Comments: []geminiComment{{Path: "a.go", Line: 1, Body: "First."}, {Path: "b.go", Line: 2, Body: "Second."}},
 	}
