@@ -40,6 +40,8 @@ jobs:
         with:
           go-version-file: go.mod
       - run: scripts/unit-test.sh
+      # The deploy script, against stand-ins for gcloud, docker and curl.
+      - run: scripts/deploy-test.sh
 
   end-to-end:
     name: End-to-end tests

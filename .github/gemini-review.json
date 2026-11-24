@@ -18,6 +18,7 @@
     {"pattern": "**/*apikey*", "why": "API key handling"},
     {"pattern": "**/*secret*", "why": "secret handling"},
     {"pattern": "Dockerfile", "why": "the production image"},
+    {"pattern": "scripts/deploy.sh", "why": "deploys to production and wires the API key secret"},
     {"pattern": "go.mod", "why": "dependencies"},
     {"pattern": "go.sum", "why": "dependencies"}
   ],
