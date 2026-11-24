@@ -40,6 +40,13 @@ concurrency:
 # a rule, a fallback to another model or a refused post turns it red. On a
 # pull request with nothing to fix, the review says "No issues found."
 #
+# Each finding in the review is numbered, F1 onwards, and the review records
+# them in a hidden marker. Once the review job ends, passed or failed, the
+# findings job (gemini-findings.yml) sets the "Gemini findings" commit
+# status from them: red while a finding at blocking_severity or above is
+# open or when no review was posted. A Gemini outage turns the review check
+# red; open findings turn the status red; the two stay apart.
+#
 # The review runs only on pull requests from this repository's own branches.
 # It builds and runs the pull request's code with the Gemini key, the Jira
 # token and a token that can write, so a fork's code must never reach it, including when
@@ -159,3 +166,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_REPLY: ${{ steps.review.outputs.reply }}
           GEMINI_OUTPUT: ${{ steps.review.outputs.cli_output }}
+
+  # Not after a run that a newer push cancelled: that push's own run reports.
+  findings:
+    needs: [origin, review]
+    if: ${{ !cancelled() && needs.origin.outputs.same_repo == 'true' }}
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      statuses: write
+    uses: ./.github/workflows/gemini-findings.yml
+    with:
+      pr_number: ${{ github.event.pull_request.number || inputs.pr_number }}

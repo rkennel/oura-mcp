@@ -17,7 +17,8 @@ const testRouting = `{
     {"pattern": "cmd/server/**", "why": "the entry point"},
     {"pattern": "**/*token*", "why": "token handling"}
   ],
-  "shared_packages": ["internal/**"]
+  "shared_packages": ["internal/**"],
+  "blocking_severity": "high"
 }`
 
 func writeFile(t *testing.T, content string) string {
@@ -88,14 +89,17 @@ func TestMatchPath(t *testing.T) {
 
 func TestLoadRoutingConfigRejectsBadFiles(t *testing.T) {
 	for name, content := range map[string]string{
-		"not JSON":       `models: flash`,
-		"misspelt key":   strings.Replace(testRouting, "high_risk_line_threshold", "high_risk_lines", 1),
-		"missing model":  strings.Replace(testRouting, `"argon"`, `""`, 1),
-		"zero threshold": strings.Replace(testRouting, `: 10,`, `: 0,`, 1),
-		"no why":         strings.Replace(testRouting, `"the entry point"`, `""`, 1),
-		"bad pattern":    strings.Replace(testRouting, `cmd/server/**`, `cmd/[server`, 1),
-		"empty pattern":  strings.Replace(testRouting, `"internal/**"`, `""`, 1),
-		"bad shared":     strings.Replace(testRouting, `"internal/**"`, `"internal/[x"`, 1),
+		"not JSON":              `models: flash`,
+		"misspelt key":          strings.Replace(testRouting, "high_risk_line_threshold", "high_risk_lines", 1),
+		"missing model":         strings.Replace(testRouting, `"argon"`, `""`, 1),
+		"zero threshold":        strings.Replace(testRouting, `: 10,`, `: 0,`, 1),
+		"no why":                strings.Replace(testRouting, `"the entry point"`, `""`, 1),
+		"bad pattern":           strings.Replace(testRouting, `cmd/server/**`, `cmd/[server`, 1),
+		"empty pattern":         strings.Replace(testRouting, `"internal/**"`, `""`, 1),
+		"bad shared":            strings.Replace(testRouting, `"internal/**"`, `"internal/[x"`, 1),
+		"no blocking":           strings.Replace(testRouting, `"blocking_severity": "high"`, `"blocking_severity": ""`, 1),
+		"blocking typo":         strings.Replace(testRouting, `"blocking_severity": "high"`, `"blocking_severity": "severe"`, 1),
+		"blocking on a concern": strings.Replace(testRouting, `"blocking_severity": "high"`, `"blocking_severity": "concern"`, 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := loadRoutingConfig(writeFile(t, content)); err == nil {

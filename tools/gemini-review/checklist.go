@@ -31,7 +31,8 @@ type verdictRow struct {
 }
 
 // assembledReview is the whole review: Gemini's summary and comments, the
-// standards check's findings as comments, and a verdict on every rule.
+// standards check's findings as comments, each numbered F1 onwards, and a
+// verdict on every rule.
 type assembledReview struct {
 	Summary   string
 	Comments  []geminiComment
@@ -106,6 +107,7 @@ func assembleReview(reply geminiReview, rules []rule, standards standardsResult)
 	for _, f := range standards.Findings {
 		review.Comments = append(review.Comments, findingComment(f))
 	}
+	numberFindings(review.Comments)
 	return review, nil
 }
 
