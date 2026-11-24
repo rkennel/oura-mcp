@@ -16,7 +16,8 @@ concurrency:
   cancel-in-progress: true
 
 # How it works: tools/gemini-review fetches the pull request and writes it,
-# with a line-numbered diff, to .gemini-review/. CI's static analysis, unit
+# with a line-numbered diff and the Jira story it implements, to
+# .gemini-review/. CI's static analysis, unit
 # tests and scripts/check-standards.sh then run on the pull request, and
 # `gemini-review facts` writes how they ended, the coverage of internal/ by
 # package and the changed internal/ files with no test change to
@@ -27,7 +28,8 @@ concurrency:
 # escalate it, and otherwise goes to the standard model. Gemini reads the
 # pull request, the facts and the repository with read-only tools and no
 # GitHub token, and replies with its review as JSON, with a verdict on every
-# rule of GEMINI.md that the standards check does not own. Those steps live
+# rule of GEMINI.md that the standards check does not own and on every
+# acceptance criterion of the story. Those steps live
 # in .github/actions/gemini-review, which the seeded-defect run
 # (gemini-review-eval.yml) shares. tools/gemini-review then checks from
 # Gemini CLI's statistics that the chosen model answered and that the
@@ -39,8 +41,8 @@ concurrency:
 # pull request with nothing to fix, the review says "No issues found."
 #
 # The review runs only on pull requests from this repository's own branches.
-# It builds and runs the pull request's code with the Gemini key and a token
-# that can write, so a fork's code must never reach it, including when
+# It builds and runs the pull request's code with the Gemini key, the Jira
+# token and a token that can write, so a fork's code must never reach it, including when
 # someone starts the review by hand. The origin job checks first, with no
 # secrets and a read-only token, and the review job is skipped unless the
 # head branch is in this repository; the origin job's summary says why.
@@ -120,10 +122,18 @@ jobs:
           go test -race ./...
           go build -o "${RUNNER_TEMP}/gemini-review" .
 
+      # Also reads the story the pull request implements from Jira, with a
+      # read-only token that only this step gets: Gemini, the facts and the
+      # post never see it, and a fork's pull request never reaches this job.
+      # Without the settings, the review runs and says why it had no
+      # acceptance criteria.
       - name: Prepare the pull request for Gemini
         run: '"${RUNNER_TEMP}/gemini-review" prepare'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
 
       # Gemini cannot run the tests or measure coverage with read-only tools,
       # so CI's own stage scripts work these out first, without the Gemini

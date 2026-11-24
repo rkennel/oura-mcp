@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -38,6 +39,38 @@ type seededCase struct {
 	// CitesCoverage asks that the verdict's reason give the computed
 	// coverage of internal/ from the facts.
 	CitesCoverage bool `json:"cites_coverage,omitempty"`
+	// Story is the story the change says it implements. Without one, the
+	// review is told there are no acceptance criteria.
+	Story *seededStory `json:"story,omitempty"`
+	// Unmet names the criteria, AC1 and so on, that the change leaves out:
+	// the review must judge them not_satisfied, and every other criterion
+	// satisfied.
+	Unmet []string `json:"unmet,omitempty"`
+	// OutsidePath is a file where the change does something the story does
+	// not ask for: the review must list a change there as outside the story.
+	// Without it, the review must list nothing outside the story.
+	OutsidePath string `json:"outside_path,omitempty"`
+}
+
+// seededStory is a story as Jira would give it, criteria already read out.
+type seededStory struct {
+	Key         string   `json:"key"`
+	Summary     string   `json:"summary"`
+	Description string   `json:"description"`
+	Criteria    []string `json:"criteria"`
+}
+
+// story is the seeded story as prepare would write it, or none.
+func (c seededCase) story() story {
+	if c.Story == nil {
+		return unavailableStory("", "no story key such as KAN-21 starts the pull request's title or first commit message, or a part of its branch name")
+	}
+	return story{
+		Key:         c.Story.Key,
+		Summary:     c.Story.Summary,
+		Description: c.Story.Description,
+		Criteria:    numberCriteria(c.Story.Criteria),
+	}
 }
 
 func loadCase(dir string) (seededCase, error) {
@@ -67,6 +100,28 @@ func (c seededCase) validate() error {
 		return fmt.Errorf("seeded case %s asks for a severity but names no lines for the comment", c.Name)
 	case c.MinSeverity != "" && (c.MinSeverity == severityConcern || severityRank[c.MinSeverity] == 0):
 		return fmt.Errorf("seeded case %s asks for severity %q, not critical, high, medium or low", c.Name, c.MinSeverity)
+	}
+	return c.validateStory()
+}
+
+func (c seededCase) validateStory() error {
+	if c.Story == nil {
+		if len(c.Unmet) > 0 || c.OutsidePath != "" {
+			return fmt.Errorf("seeded case %s expects verdicts on a story but has none", c.Name)
+		}
+		return nil
+	}
+	if strings.TrimSpace(c.Story.Key) == "" || strings.TrimSpace(c.Story.Summary) == "" || len(c.Story.Criteria) == 0 {
+		return fmt.Errorf("seeded case %s needs a story key, summary and at least one criterion", c.Name)
+	}
+	known := map[string]bool{}
+	for _, id := range c.story().criterionIDs() {
+		known[id] = true
+	}
+	for _, id := range c.Unmet {
+		if !known[id] {
+			return fmt.Errorf("seeded case %s expects %s unmet, which its story does not have", c.Name, id)
+		}
 	}
 	return nil
 }
@@ -151,7 +206,10 @@ func seedCommand(caseDir, reviewDir, repo string, out io.Writer) error {
 			return fmt.Errorf("write %s: %w", name, err)
 		}
 	}
-	fmt.Fprintf(out, "Seeded case %s: %d files changed.\n", c.Name, len(files))
+	if err := writeStory(reviewDir, c.story()); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Seeded case %s: %d files changed. %s\n", c.Name, len(files), storyStatus(c.story()))
 	return nil
 }
 
@@ -208,6 +266,12 @@ func evaluateCommand(caseDir, reviewDir string, inputs evaluateInputs, out io.Wr
 
 // misses lists what the review should have said about the case and did not.
 func (c seededCase) misses(review assembledReview, coverage string) []string {
+	return append(c.ruleMisses(review, coverage), c.storyMisses(review.Story)...)
+}
+
+// ruleMisses lists what the review should have said about the rule the case
+// breaks, or about a change that breaks none, and did not.
+func (c seededCase) ruleMisses(review assembledReview, coverage string) []string {
 	if c.Breaks == "" {
 		return cleanMisses(review)
 	}
@@ -224,6 +288,42 @@ func (c seededCase) misses(review assembledReview, coverage string) []string {
 		misses = append(misses, fmt.Sprintf("the %s verdict does not cite the computed coverage, %s", c.Breaks, coverage))
 	}
 	return misses
+}
+
+// storyMisses lists what the review should have said about the change
+// against its story and did not: each criterion the change leaves out
+// judged not_satisfied, every other one satisfied, and a change outside the
+// story listed where there is one, and none where there is not.
+func (c seededCase) storyMisses(review storyReview) []string {
+	if c.Story == nil {
+		return nil
+	}
+	var misses []string
+	for _, id := range review.Story.criterionIDs() {
+		want := criterionSatisfied
+		if slices.Contains(c.Unmet, id) {
+			want = criterionNotSatisfied
+		}
+		if got := review.verdictFor(id); got != want {
+			misses = append(misses, fmt.Sprintf("the review judged %s %q, want %q", id, got, want))
+		}
+	}
+	switch {
+	case c.OutsidePath != "" && !listsOutside(review.Outside, c.OutsidePath):
+		misses = append(misses, "the review lists no change in "+c.OutsidePath+" as outside the story")
+	case c.OutsidePath == "" && len(review.Outside) > 0:
+		misses = append(misses, fmt.Sprintf("every change serves the story, but the review lists %d as outside it", len(review.Outside)))
+	}
+	return misses
+}
+
+func listsOutside(changes []outsideChange, path string) bool {
+	for _, change := range changes {
+		if change.Path == path {
+			return true
+		}
+	}
+	return false
 }
 
 // cleanMisses lists what the review said about a clean change that it
@@ -283,6 +383,7 @@ func evaluationReport(c seededCase, review assembledReview, decision routing, mi
 			expected += fmt.Sprintf(" and a confirmed comment%s on `%s` lines %d to %d", c.severityWanted(), c.Path, c.From, c.To)
 		}
 	}
+	expected += c.storyExpected()
 	fmt.Fprintf(&b, "### Seeded case `%s`: %s\n\n", c.Name, outcome)
 	fmt.Fprintf(&b, "Expected %s. %s\n\n", expected, decision.explain())
 	for _, miss := range misses {
@@ -298,8 +399,25 @@ func evaluationReport(c seededCase, review assembledReview, decision routing, mi
 	for _, comment := range review.Comments {
 		fmt.Fprintf(&b, "- `%s` line %d: %s\n", comment.Path, comment.Line, tableCell(withSeverity(comment)))
 	}
+	b.WriteString("\n" + storySection(review.Story))
 	b.WriteString("\n" + checklistTable(review.Checklist) + "\n")
 	return b.String()
+}
+
+// storyExpected says, for the evaluation report, what the review must say
+// about the case's story.
+func (c seededCase) storyExpected() string {
+	if c.Story == nil {
+		return ""
+	}
+	expected := "; every acceptance criterion satisfied"
+	if len(c.Unmet) > 0 {
+		expected = "; " + strings.Join(c.Unmet, ", ") + " not satisfied and every other criterion satisfied"
+	}
+	if c.OutsidePath != "" {
+		return expected + "; a change in `" + c.OutsidePath + "` listed as outside the story"
+	}
+	return expected + "; nothing outside the story"
 }
 
 func readJSON(name string, target any) error {

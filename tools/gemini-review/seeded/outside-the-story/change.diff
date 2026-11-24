@@ -1,0 +1,75 @@
+diff --git a/README.md b/README.md
+index 62af343..6b9785e 100644
+--- a/README.md
++++ b/README.md
+@@ -134,7 +134,7 @@ not worked out, is reported as `no data yet` and never estimated.
+ 
+ The client takes the access token from a `TokenSource`, so token storage
+ and refresh stay out of it. It follows `next_token` through every page and
+-gives up on a read after 15 seconds with an error that names the
++gives up on a read after 30 seconds with an error that names the
+ collection. An error status from Oura comes back as a `StatusError` with the
+ status and Oura's explanation.
+ 
+diff --git a/internal/oura/client.go b/internal/oura/client.go
+index 5a4ce3e..be3691c 100644
+--- a/internal/oura/client.go
++++ b/internal/oura/client.go
+@@ -18,7 +18,7 @@ import (
+ const (
+ 	// DefaultTimeout bounds each read of an Oura collection, every page
+ 	// included, so a slow Oura gives a clear error rather than a hang.
+-	DefaultTimeout = 15 * time.Second
++	DefaultTimeout = 30 * time.Second
+ 
+ 	// collectionPath is where Oura serves the user's collections.
+ 	collectionPath = "/v2/usercollection/"
+diff --git a/internal/oura/days.go b/internal/oura/days.go
+index 35d4264..34bef8c 100644
+--- a/internal/oura/days.go
++++ b/internal/oura/days.go
+@@ -2,6 +2,7 @@ package oura
+ 
+ import (
+ 	"errors"
++	"fmt"
+ 	"time"
+ )
+ 
+@@ -19,11 +20,14 @@ type DayRange struct {
+ }
+ 
+ // NewDayRange returns the days from first to last, both included. Only the
+-// calendar date of each is used, in its own location.
++// calendar date of each is used, in its own location. A range that ends
++// before it starts is an error that names both dates, so the caller can
++// see which request was wrong.
+ func NewDayRange(first, last time.Time) (DayRange, error) {
+ 	days := DayRange{first: dateOf(first), last: dateOf(last)}
+ 	if days.last.Before(days.first) {
+-		return DayRange{}, errRangeReversed
++		return DayRange{}, fmt.Errorf("%s to %s: %w",
++			days.first.Format(dayLayout), days.last.Format(dayLayout), errRangeReversed)
+ 	}
+ 	return days, nil
+ }
+diff --git a/internal/oura/days_test.go b/internal/oura/days_test.go
+index a5972e2..82d94c1 100644
+--- a/internal/oura/days_test.go
++++ b/internal/oura/days_test.go
+@@ -51,6 +51,15 @@ func TestNewDayRangeRefusesARangeThatEndsBeforeItStarts(t *testing.T) {
+ 	}
+ }
+ 
++func TestNewDayRangeNamesBothDatesOfAReversedRange(t *testing.T) {
++	_, err := NewDayRange(mustDate(t, "2026-11-02"), mustDate(t, "2026-11-01"))
++
++	want := "2026-11-02 to 2026-11-01: the date range ends before it starts"
++	if err == nil || err.Error() != want {
++		t.Errorf("error = %v, want %q", err, want)
++	}
++}
++
+ func TestNewDayRangeUsesEachTimesOwnCalendarDate(t *testing.T) {
+ 	detroit, err := time.LoadLocation("America/Detroit")
+ 	if err != nil {

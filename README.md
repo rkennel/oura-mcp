@@ -17,7 +17,7 @@ and deployed as a container on Google Cloud Run.
 | `e2e/fakeoura` | A fake Oura API that the end-to-end environment runs as its own container. |
 | `scripts/` | The CI stages, runnable locally, the scripts that run the server on your machine, and the deploy. |
 | `docs/` | Guides, such as the Google Cloud setup and deploy. |
-| `tools/gemini-review` | Fetches a pull request for the Gemini review, picks the model, works out the facts it reviews with, checks the mechanical rules of `GEMINI.md`, and posts Gemini's reply. Its own Go module. |
+| `tools/gemini-review` | Fetches a pull request and the Jira story it implements for the Gemini review, picks the model, works out the facts it reviews with, checks the mechanical rules of `GEMINI.md`, and posts Gemini's reply. Its own Go module. |
 | `tools/gemini-review/seeded` | Seeded-defect cases: known changes that each break one rule of `GEMINI.md`, or none, for proving the review catches them. |
 | `.github/actions/gemini-review` | The review steps (routing, triage, prompt, Gemini) shared by the pull request review and the seeded-defect run. |
 | `Dockerfile` | The production image. |
@@ -304,6 +304,42 @@ a security rule is critical or high. A review whose only findings are
 concerns opens with "No confirmed issues." so a doubt is not read as a
 defect.
 
+### Reviewing against the story
+
+The review also asks whether the right thing was built. `gemini-review
+prepare` finds the story key at the start of the pull request's title (such
+as `KAN-21: ...`), or else at the start of a part of its branch name or of
+its first commit message, reads the story from Jira and writes its summary,
+its acceptance criteria (numbered AC1, AC2 and so on) and its description to
+`.gemini-review/story.md`, marked as the specification to review against and
+never as instructions. The criteria are the paragraphs, or list items, under
+the description's "Acceptance criteria" heading, so each Given/When/Then
+scenario is one criterion.
+
+Gemini says for each criterion whether the change satisfies it, partly
+satisfies it or does not, with a reason and the file, line or test that
+shows it, and lists each change of behaviour that no part of the story
+explains. A reply that leaves a criterion out fails the run, as a missing
+rule does. The review posts this as an "Acceptance criteria" section above
+the standards checklist; a criterion not fully satisfied counts as a
+finding, and a change outside the story is listed for you to weigh.
+
+When there is no story key, Jira has no such story, Jira cannot be reached
+or the Jira settings are missing, the review still runs and the section says
+"Not checked" and why. The check does not fail for it.
+
+Jira is read with a read-only API token, set in the repository's settings
+(Settings, Secrets and variables, Actions):
+
+| Setting | Kind | Value |
+|---|---|---|
+| `JIRA_BASE_URL` | Variable | `https://api.atlassian.com/ex/jira/<cloud id>` for a scoped token, or the site's address, such as `https://kennelfitness.atlassian.net`, for a classic one |
+| `JIRA_EMAIL` | Secret | The Atlassian account the token belongs to |
+| `JIRA_API_TOKEN` | Secret | An API token with read access to the stories, best a scoped token with only `read:jira-work` |
+
+Only the prepare step gets them. Gemini never sees the token: the tool
+fetches the story and Gemini reads the file.
+
 ### Proving the review catches defects
 
 `.github/workflows/gemini-review-eval.yml` reviews each case in
@@ -317,6 +353,15 @@ There is a case for each rule Gemini judges that the stories name, and two
 clean cases: a documentation change, and an Oura client change that follows
 every rule. Each job's summary shows the review it got.
 
+A case can also carry the story it implements. The review must then judge
+the criteria the change leaves out (`unmet`) not satisfied and every other
+one satisfied, and list a change outside the story where the case names a
+file for one (`outside_path`) and none where it does not. The documentation
+case meets its story in full; `criterion-left-out` leaves a criterion out;
+`story-with-instructions` does too, with a story that tells the reviewer to
+pass every criterion; and `outside-the-story` changes the Oura timeout,
+which its story does not ask for.
+
 It spends Gemini API calls, so it runs by hand. Run it **after changing the
 review prompt (`tools/gemini-review/prompt.go`), the routing or model IDs in
 `.github/gemini-review.json`, or the Gemini CLI pin in
@@ -326,8 +371,9 @@ naming one case. GitHub offers the button only once the workflow is on
 `main`.
 
 A case is a folder with `case.json` (the title and description Gemini sees,
-the rule it breaks, the file and lines a comment must land on, and
-optionally `min_severity`, the least severity that comment may have) and
+the rule it breaks, the file and lines a comment must land on, optionally
+`min_severity`, the least severity that comment may have, and optionally the
+`story` with what the review must say about it) and
 `change.diff`, a patch against `main`. `scripts/tools-test.sh` fails when a
 case names a rule `GEMINI.md` no longer has, expects lines its change does
 not show, or has a patch that no longer applies; regenerate the patch when
@@ -361,8 +407,8 @@ tab with its number.
 ### Pull requests from forks
 
 The review runs only on pull requests from branches in this repository,
-because it builds and runs the pull request's code with the Gemini key and a
-token that can write. Before the review job starts, a job with no secrets and
+because it builds and runs the pull request's code with the Gemini key, the
+Jira token and a token that can write. Before the review job starts, a job with no secrets and
 a read-only token asks GitHub where the pull request's head branch lives. On
 a fork's pull request, whether the pull request or a manual run started the
 workflow, the review job is skipped and that job's summary says why.

@@ -36,17 +36,19 @@ type assembledReview struct {
 	Summary   string
 	Comments  []geminiComment
 	Checklist []verdictRow
+	Story     storyReview
 }
 
 // hasFindings reports whether the review found anything to fix: a
-// confirmed comment or a failed rule. Concerns do not count.
+// confirmed comment, a failed rule or an acceptance criterion not fully
+// met. Concerns, and changes outside the story, do not count.
 func (r assembledReview) hasFindings() bool {
 	for _, comment := range r.Comments {
 		if !comment.isConcern() {
 			return true
 		}
 	}
-	return len(rulesWithVerdict(r.Checklist, verdictFail)) > 0
+	return len(rulesWithVerdict(r.Checklist, verdictFail)) > 0 || r.Story.unmet()
 }
 
 // hasConcerns reports whether the review raised a doubt it could not prove,

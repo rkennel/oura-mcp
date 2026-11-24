@@ -11,6 +11,7 @@ type geminiReview struct {
 	Summary   string           `json:"summary"`
 	Comments  []geminiComment  `json:"comments"`
 	Checklist []checklistEntry `json:"checklist"`
+	Story     *storyReply      `json:"story"` // null when there are no acceptance criteria
 }
 
 type geminiComment struct {
@@ -142,7 +143,8 @@ func withoutLineComments(review assembledReview, commitID, modelNote string) rev
 }
 
 // reviewBody is Gemini's summary, then any comments that could not go on a
-// line, then the verdict on every rule, then which model reviewed and why. A
+// line, then the verdict on each acceptance criterion, then the verdict on
+// every rule, then which model reviewed and why. A
 // review that found nothing says so, so a quiet review cannot be mistaken
 // for one that never ran, and one that found only concerns says that none
 // is confirmed.
@@ -164,6 +166,7 @@ func reviewBody(review assembledReview, unplaced []geminiComment, commitID, mode
 		}
 		b.WriteString("\n")
 	}
+	b.WriteString(storySection(review.Story) + "\n")
 	if len(review.Checklist) > 0 {
 		b.WriteString(checklistTable(review.Checklist) + "\n")
 	}

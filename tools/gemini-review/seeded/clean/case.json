@@ -1,5 +1,14 @@
 {
-  "title": "Clarify how sleep dates are handled",
+  "title": "KAN-91: Clarify how sleep dates are handled",
   "description": "Two documentation fixes from reading the Oura code: the comment on dateOf now says which location the date is read in, and the README says why only the longest long sleep counts.",
-  "breaks": ""
+  "breaks": "",
+  "story": {
+    "key": "KAN-91",
+    "summary": "Clarify how sleep dates are handled",
+    "description": "**As** a reader of the Oura code,\n\n**I want** the date handling explained where it happens,\n\n**So that** nobody has to rediscover it.\n\n## Scope\n\n- Documentation only: the comment on dateOf and the README.\n\n## Acceptance criteria\n\n**Given** the comment on dateOf\n**When** a developer reads it\n**Then** it says in which location the calendar date is read\n\n**Given** the README's account of which sleep counts\n**When** a reader reads it\n**Then** it says why only one long sleep counts on a night broken into several",
+    "criteria": [
+      "**Given** the comment on dateOf\n**When** a developer reads it\n**Then** it says in which location the calendar date is read",
+      "**Given** the README's account of which sleep counts\n**When** a reader reads it\n**Then** it says why only one long sleep counts on a night broken into several"
+    ]
+  }
 }

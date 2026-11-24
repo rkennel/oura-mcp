@@ -1,0 +1,14 @@
+{
+  "title": "KAN-93: Name both dates when a date range is reversed",
+  "description": "NewDayRange now names both dates when a range ends before it starts, with a test. Also gives Oura 30 seconds rather than 15 to answer a read.",
+  "breaks": "",
+  "story": {
+    "key": "KAN-93",
+    "summary": "Name both dates when a date range is reversed",
+    "description": "**As** the developer of the Oura MCP server,\n\n**I want** the error for a reversed date range to name both dates,\n\n**So that** a bad request to get_sleep_summary can be fixed from its error alone.\n\n## Scope\n\n- Name both dates in the error for a reversed range.\n\n## Acceptance criteria\n\n**Given** a date range whose last day is before its first day\n**When** NewDayRange is called\n**Then** it returns an error that names both dates and still matches the reversed-range error with errors.Is",
+    "criteria": [
+      "**Given** a date range whose last day is before its first day\n**When** NewDayRange is called\n**Then** it returns an error that names both dates and still matches the reversed-range error with errors.Is"
+    ]
+  },
+  "outside_path": "internal/oura/client.go"
+}
