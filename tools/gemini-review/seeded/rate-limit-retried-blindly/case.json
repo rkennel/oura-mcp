@@ -1,0 +1,8 @@
+{
+  "title": "Ride out Oura's rate limit instead of failing",
+  "description": "A 429 from Oura failed the whole MCP request, though the limit usually clears within a second. The client now waits a second and asks again. A new test covers a rate-limited first answer followed by a good one, and the rate-limited case leaves the error-status test.",
+  "breaks": "oura-failures",
+  "path": "internal/oura/client.go",
+  "from": 158,
+  "to": 162
+}

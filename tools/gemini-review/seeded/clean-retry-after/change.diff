@@ -1,0 +1,90 @@
+diff --git a/internal/oura/client.go b/internal/oura/client.go
+index 5a4ce3e..eb3ee42 100644
+--- a/internal/oura/client.go
++++ b/internal/oura/client.go
+@@ -11,6 +11,7 @@ import (
+ 	"io"
+ 	"net/http"
+ 	"net/url"
++	"strconv"
+ 	"strings"
+ 	"time"
+ )
+@@ -59,6 +60,10 @@ type StatusError struct {
+ 	StatusCode int
+ 	// Detail is Oura's explanation, or the status text when it gave none.
+ 	Detail string
++	// RetryAfter is how long Oura asked the client to wait before trying
++	// again, from the Retry-After header of a 429, or zero when it asked
++	// for no particular wait.
++	RetryAfter time.Duration
+ }
+ 
+ func (e *StatusError) Error() string {
+@@ -223,7 +228,23 @@ func statusError(collection string, response *http.Response) *StatusError {
+ 	if err := json.NewDecoder(io.LimitReader(response.Body, maxErrorBytes)).Decode(&body); err == nil && body.Detail != "" {
+ 		detail = body.Detail
+ 	}
+-	return &StatusError{Collection: collection, StatusCode: response.StatusCode, Detail: detail}
++	return &StatusError{
++		Collection: collection,
++		StatusCode: response.StatusCode,
++		Detail:     detail,
++		RetryAfter: retryAfter(response.Header.Get("Retry-After")),
++	}
++}
++
++// retryAfter reads a Retry-After header given in whole seconds. Anything
++// else, the HTTP-date form included, reads as zero, so a caller reports the
++// limit rather than guess how long to wait.
++func retryAfter(header string) time.Duration {
++	seconds, err := strconv.Atoi(strings.TrimSpace(header))
++	if err != nil || seconds < 0 {
++		return 0
++	}
++	return time.Duration(seconds) * time.Second
+ }
+ 
+ // inRange returns the documents whose day is in days.
+diff --git a/internal/oura/client_test.go b/internal/oura/client_test.go
+index a188350..b245654 100644
+--- a/internal/oura/client_test.go
++++ b/internal/oura/client_test.go
+@@ -268,6 +268,37 @@ func TestClientSurfacesOurasErrorStatus(t *testing.T) {
+ 	}
+ }
+ 
++func TestClientCarriesTheWaitOuraAsksForWhenRateLimited(t *testing.T) {
++	oura := &fakeOura{respond: func(*http.Request) (*http.Response, error) {
++		limited := answer(http.StatusTooManyRequests, `{"detail": "Rate limit exceeded"}`)
++		limited.Header.Set("Retry-After", "120")
++		return limited, nil
++	}}
++
++	_, err := newTestClient(oura).Sleep(t.Context(), mustDays(t, "2026-11-01", "2026-11-01"))
++
++	var statusErr *StatusError
++	if !errors.As(err, &statusErr) || statusErr.RetryAfter != 2*time.Minute {
++		t.Errorf("error = %v, want a *StatusError asking for a 2m0s wait", err)
++	}
++}
++
++func TestRetryAfterReadsOnlyWholeSeconds(t *testing.T) {
++	for header, want := range map[string]time.Duration{
++		"120":                           2 * time.Minute,
++		" 5 ":                           5 * time.Second,
++		"0":                             0,
++		"":                              0,
++		"-5":                            0,
++		"soon":                          0,
++		"Wed, 21 Oct 2026 07:28:00 GMT": 0,
++	} {
++		if got := retryAfter(header); got != want {
++			t.Errorf("retryAfter(%q) = %v, want %v", header, got, want)
++		}
++	}
++}
++
+ func TestClientTimesOutWhenOuraDoesNotAnswer(t *testing.T) {
+ 	oura := &fakeOura{respond: func(request *http.Request) (*http.Response, error) {
+ 		<-request.Context().Done()

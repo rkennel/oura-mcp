@@ -33,12 +33,59 @@ func TestParseGeminiReviewRejectsUnusableReplies(t *testing.T) {
 		"comment no path":  `{"summary": "x", "comments": [{"line": 1, "body": "b"}]}`,
 		"comment no body":  `{"summary": "x", "comments": [{"path": "a.go", "line": 1}]}`,
 		"wrong field type": `{"summary": 7}`,
+		"unknown severity": `{"summary": "x", "comments": [{"path": "a.go", "line": 1, "severity": "info", "body": "b"}]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := parseGeminiReview(reply); err == nil {
 				t.Errorf("parseGeminiReview(%q) succeeded", reply)
 			}
 		})
+	}
+}
+
+func TestParseGeminiReviewNormalisesTheSeverity(t *testing.T) {
+	review, err := parseGeminiReview(`{"summary": "x", "comments": [{"path": "a.go", "line": 1, "severity": " Concern ", "body": "b"}]}`)
+	if err != nil {
+		t.Fatalf("parseGeminiReview: %v", err)
+	}
+	if got := review.Comments[0]; got.Severity != severityConcern || !got.isConcern() {
+		t.Errorf("comment = %+v, want a concern", got)
+	}
+}
+
+func TestAConcernIsLabelledAsUnconfirmed(t *testing.T) {
+	concern := geminiComment{Path: "a.go", Line: 1, Severity: severityConcern, Body: "The refresh may race."}
+	confirmed := geminiComment{Path: "a.go", Line: 1, Severity: severityHigh, Body: "The token is logged."}
+
+	if got := withSeverity(concern); got != "**[CONCERN]** "+concernNote+" The refresh may race." {
+		t.Errorf("concern = %q", got)
+	}
+	if got := withSeverity(confirmed); got != "**[HIGH]** The token is logged." || strings.Contains(got, concernNote) {
+		t.Errorf("confirmed = %q", got)
+	}
+	if concern.atLeast(severityLow) || !confirmed.atLeast(severityHigh) || confirmed.atLeast(severityCritical) {
+		t.Error("atLeast ranks the severities wrongly")
+	}
+}
+
+func TestAReviewWithOnlyConcernsSaysNoneIsConfirmed(t *testing.T) {
+	review := assembledReview{
+		Summary:  "Adds token rotation.",
+		Comments: []geminiComment{{Path: "a.go", Line: 3, Severity: severityConcern, Body: "The save may not be durable."}},
+	}
+
+	got := buildReview(review, "abc", "", map[anchor]bool{{"a.go", sideRight, 3}: true})
+
+	if !strings.HasPrefix(got.Body, onlyConcerns) || strings.Contains(got.Body, noFindings) {
+		t.Errorf("body = %q, want the only-concerns note and not the no-findings one", got.Body)
+	}
+	if len(got.Comments) != 1 || !strings.HasPrefix(got.Comments[0].Body, "**[CONCERN]** "+concernNote) {
+		t.Errorf("comments = %+v, want the concern labelled", got.Comments)
+	}
+
+	review.Comments = append(review.Comments, geminiComment{Path: "a.go", Line: 3, Severity: severityHigh, Body: "Logged."})
+	if body := buildReview(review, "abc", "", nil).Body; strings.Contains(body, onlyConcerns) || strings.Contains(body, noFindings) {
+		t.Errorf("a review with a confirmed finding says there is none:\n%s", body)
 	}
 }
 

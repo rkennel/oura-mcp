@@ -1,0 +1,43 @@
+diff --git a/internal/oura/client.go b/internal/oura/client.go
+index 5a4ce3e..eb21d51 100644
+--- a/internal/oura/client.go
++++ b/internal/oura/client.go
+@@ -124,7 +124,9 @@ type page[T dated] struct {
+ // readCollection returns every document of collection whose day is in
+ // days, following next_token through the pages.
+ func readCollection[T dated](ctx context.Context, c *Client, collection string, days DayRange) ([]T, error) {
+-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
++	// A read runs to the end under the client's own timeout, even when the
++	// caller gives up, so a slow page does not leave the read half done.
++	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+ 	defer cancel()
+ 
+ 	documents := []T{}
+diff --git a/internal/oura/client_test.go b/internal/oura/client_test.go
+index a188350..cea1a91 100644
+--- a/internal/oura/client_test.go
++++ b/internal/oura/client_test.go
+@@ -313,23 +313,6 @@ func TestClientTimesOutWhenOuraStopsSendingTheAnswer(t *testing.T) {
+ 	}
+ }
+ 
+-func TestClientReportsACancelledCallAsCancelledNotTimedOut(t *testing.T) {
+-	ctx, cancel := context.WithCancel(t.Context())
+-	cancel()
+-	oura := &fakeOura{respond: func(request *http.Request) (*http.Response, error) {
+-		return nil, request.Context().Err()
+-	}}
+-
+-	_, err := newTestClient(oura).Sleep(ctx, mustDays(t, "2026-11-01", "2026-11-01"))
+-
+-	if !errors.Is(err, context.Canceled) {
+-		t.Errorf("error = %v, want it to wrap %v", err, context.Canceled)
+-	}
+-	if errors.Is(err, ErrTimeout) {
+-		t.Errorf("error = %v, a cancelled call is not a timeout", err)
+-	}
+-}
+-
+ func TestClientSurfacesAFailedConnection(t *testing.T) {
+ 	refused := errors.New("connection refused")
+ 	oura := &fakeOura{respond: func(*http.Request) (*http.Response, error) { return nil, refused }}

@@ -38,6 +38,36 @@ type reviewComment struct {
 
 const noFindings = "**No issues found.** Neither Gemini nor the standards check has comments on this change."
 
+// onlyConcerns opens a review whose only findings are concerns, so that a
+// doubt Gemini could not prove is not read as a confirmed problem.
+const onlyConcerns = "**No confirmed issues.** Gemini raised concerns it could not prove, marked CONCERN; weigh them before merging."
+
+// Severities a comment can carry. A concern is a problem Gemini finds
+// plausible but cannot prove; the others are confirmed, from most to least
+// severe.
+const (
+	severityCritical = "critical"
+	severityHigh     = "high"
+	severityMedium   = "medium"
+	severityLow      = "low"
+	severityConcern  = "concern"
+)
+
+// severityRank orders the severities, so that a seeded case can ask for a
+// comment of at least some severity. A concern ranks below every confirmed
+// severity, and a missing or unknown one below that.
+var severityRank = map[string]int{
+	severityConcern:  1,
+	severityLow:      2,
+	severityMedium:   3,
+	severityHigh:     4,
+	severityCritical: 5,
+}
+
+// concernNote follows the label of a concern, so that it reads as a doubt
+// to weigh rather than a defect to fix.
+const concernNote = "*Not confirmed: Gemini could not prove this from the diff and the repository.*"
+
 // parseGeminiReview extracts the review from Gemini's reply. The reply should
 // be the bare JSON object, but a model may wrap it in a code fence or a
 // sentence, so the outermost braces are taken.
@@ -53,8 +83,25 @@ func parseGeminiReview(reply string) (geminiReview, error) {
 		if strings.TrimSpace(comment.Path) == "" || strings.TrimSpace(comment.Body) == "" {
 			return geminiReview{}, fmt.Errorf("gemini's comment %d has no path or no body", i+1)
 		}
+		severity := strings.ToLower(strings.TrimSpace(comment.Severity))
+		if _, known := severityRank[severity]; severity != "" && !known {
+			return geminiReview{}, fmt.Errorf("gemini's comment %d has severity %q, not critical, high, medium, low or concern", i+1, comment.Severity)
+		}
+		review.Comments[i].Severity = severity
 	}
 	return review, nil
+}
+
+// isConcern reports whether the comment is a doubt rather than a confirmed
+// problem.
+func (c geminiComment) isConcern() bool {
+	return c.Severity == severityConcern
+}
+
+// atLeast reports whether the comment is confirmed and at least as severe
+// as severity.
+func (c geminiComment) atLeast(severity string) bool {
+	return !c.isConcern() && severityRank[c.Severity] >= severityRank[severity]
 }
 
 // buildReview turns the review into a GitHub review on commitID. A
@@ -97,10 +144,15 @@ func withoutLineComments(review assembledReview, commitID, modelNote string) rev
 // reviewBody is Gemini's summary, then any comments that could not go on a
 // line, then the verdict on every rule, then which model reviewed and why. A
 // review that found nothing says so, so a quiet review cannot be mistaken
-// for one that never ran.
+// for one that never ran, and one that found only concerns says that none
+// is confirmed.
 func reviewBody(review assembledReview, unplaced []geminiComment, commitID, modelNote string) string {
 	var b strings.Builder
-	if !review.hasFindings() {
+	switch {
+	case review.hasFindings():
+	case review.hasConcerns():
+		b.WriteString(onlyConcerns + "\n\n")
+	default:
 		b.WriteString(noFindings + "\n\n")
 	}
 	b.WriteString(strings.TrimSpace(review.Summary))
@@ -122,13 +174,19 @@ func reviewBody(review assembledReview, unplaced []geminiComment, commitID, mode
 	return b.String()
 }
 
+// withSeverity labels the comment's body with its severity, and marks a
+// concern as unconfirmed.
 func withSeverity(comment geminiComment) string {
 	severity := strings.ToUpper(strings.TrimSpace(comment.Severity))
 	body := strings.TrimSpace(comment.Body)
-	if severity == "" {
+	switch {
+	case severity == "":
 		return body
+	case comment.isConcern():
+		return fmt.Sprintf("**[%s]** %s %s", severity, concernNote, body)
+	default:
+		return fmt.Sprintf("**[%s]** %s", severity, body)
 	}
-	return fmt.Sprintf("**[%s]** %s", severity, body)
 }
 
 func shortSHA(sha string) string {

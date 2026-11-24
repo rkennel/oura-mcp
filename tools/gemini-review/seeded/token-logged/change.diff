@@ -1,0 +1,22 @@
+diff --git a/internal/oura/client.go b/internal/oura/client.go
+index 5a4ce3e..a9281bf 100644
+--- a/internal/oura/client.go
++++ b/internal/oura/client.go
+@@ -9,6 +9,7 @@ import (
+ 	"errors"
+ 	"fmt"
+ 	"io"
++	"log/slog"
+ 	"net/http"
+ 	"net/url"
+ 	"strings"
+@@ -186,6 +187,9 @@ func (c *Client) newRequest(ctx context.Context, collection string, days DayRang
+ 	}
+ 	request.Header.Set("Authorization", "Bearer "+token)
+ 	request.Header.Set("Accept", "application/json")
++	// At debug level, log exactly what goes to Oura, so that a 401 can be
++	// traced to the request that caused it.
++	slog.DebugContext(ctx, "oura request", "url", address, "authorization", request.Header.Get("Authorization"))
+ 	return request, nil
+ }
+ 

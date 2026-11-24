@@ -6,10 +6,12 @@ import (
 	"strings"
 )
 
-// Verdicts a checklist entry can give a rule.
+// Verdicts a checklist entry can give a rule. A concern means the change
+// may break the rule but Gemini cannot prove it; it is not a failure.
 const (
 	verdictPass          = "pass"
 	verdictFail          = "fail"
+	verdictConcern       = "concern"
 	verdictNotApplicable = "not_applicable"
 )
 
@@ -36,17 +38,26 @@ type assembledReview struct {
 	Checklist []verdictRow
 }
 
-// hasFindings reports whether the review found anything to fix.
+// hasFindings reports whether the review found anything to fix: a
+// confirmed comment or a failed rule. Concerns do not count.
 func (r assembledReview) hasFindings() bool {
-	if len(r.Comments) > 0 {
-		return true
-	}
-	for _, row := range r.Checklist {
-		if row.Verdict == verdictFail {
+	for _, comment := range r.Comments {
+		if !comment.isConcern() {
 			return true
 		}
 	}
-	return false
+	return len(rulesWithVerdict(r.Checklist, verdictFail)) > 0
+}
+
+// hasConcerns reports whether the review raised a doubt it could not prove,
+// as a comment or as a rule's verdict.
+func (r assembledReview) hasConcerns() bool {
+	for _, comment := range r.Comments {
+		if comment.isConcern() {
+			return true
+		}
+	}
+	return len(rulesWithVerdict(r.Checklist, verdictConcern)) > 0
 }
 
 // verdictFor returns the review's verdict on a rule, or "" if it has none.
@@ -61,9 +72,9 @@ func (r assembledReview) verdictFor(ruleID string) verdictRow {
 
 // assembleReview joins Gemini's review and the standards check's result. It
 // fails when Gemini's checklist omits a rule it must judge, names a rule
-// GEMINI.md does not have, or gives a verdict that is not pass, fail or
-// not_applicable, and when the standards check did not cover a rule
-// GEMINI.md marks as checked by it. A failure means nothing is posted.
+// GEMINI.md does not have, or gives a verdict that is not pass, fail,
+// concern or not_applicable, and when the standards check did not cover a
+// rule GEMINI.md marks as checked by it. A failure means nothing is posted.
 func assembleReview(reply geminiReview, rules []rule, standards standardsResult) (assembledReview, error) {
 	if err := checkScriptCoverage(rules, standards); err != nil {
 		return assembledReview{}, err
@@ -135,8 +146,8 @@ func indexChecklist(entries []checklistEntry, rules []rule) (map[string]checklis
 			return nil, fmt.Errorf("gemini's checklist entry %d names %q, which is not a rule in GEMINI.md", i+1, entry.Rule)
 		case r.Script:
 			continue
-		case entry.Verdict != verdictPass && entry.Verdict != verdictFail && entry.Verdict != verdictNotApplicable:
-			return nil, fmt.Errorf("gemini's verdict on %s is %q, not pass, fail or not_applicable", entry.Rule, entry.Verdict)
+		case !knownVerdict(entry.Verdict):
+			return nil, fmt.Errorf("gemini's verdict on %s is %q, not pass, fail, concern or not_applicable", entry.Rule, entry.Verdict)
 		case entry.Reason == "":
 			return nil, fmt.Errorf("gemini's verdict on %s gives no reason", entry.Rule)
 		case index[entry.Rule].Rule != "":
@@ -145,6 +156,15 @@ func indexChecklist(entries []checklistEntry, rules []rule) (map[string]checklis
 		index[entry.Rule] = entry
 	}
 	return index, nil
+}
+
+// knownVerdict reports whether verdict is one Gemini may give a rule.
+func knownVerdict(verdict string) bool {
+	switch verdict {
+	case verdictPass, verdictFail, verdictConcern, verdictNotApplicable:
+		return true
+	}
+	return false
 }
 
 // scriptVerdict is the standards check's verdict on one mechanical rule.
@@ -185,6 +205,8 @@ func verdictLabel(verdict string) string {
 		return "✅ pass"
 	case verdictFail:
 		return "❌ fail"
+	case verdictConcern:
+		return "⚠️ concern, not confirmed"
 	default:
 		return "➖ not applicable"
 	}
@@ -196,11 +218,12 @@ func tableCell(text string) string {
 	return strings.Join(strings.Fields(text), " ")
 }
 
-// failedRules lists the IDs of the rules the review failed, in order.
-func failedRules(rows []verdictRow) []string {
+// rulesWithVerdict lists, sorted, the IDs of the rules whose verdict is
+// verdict.
+func rulesWithVerdict(rows []verdictRow, verdict string) []string {
 	var ids []string
 	for _, row := range rows {
-		if row.Verdict == verdictFail {
+		if row.Verdict == verdict {
 			ids = append(ids, row.Rule.ID)
 		}
 	}

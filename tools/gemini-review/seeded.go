@@ -20,8 +20,10 @@ const (
 
 // seededCase is a known change and what the review must say about it. A
 // case that breaks a rule names it, and the review must fail that rule and,
-// when Path is set, comment on Path between lines From and To. A case that
-// breaks nothing must get no comment and no failed rule.
+// when Path is set, make a confirmed comment on Path between lines From and
+// To. A concern does not count: the seeded defects are provable. A case that
+// breaks nothing must get no comment, not even a concern, and no failed rule
+// or concern.
 type seededCase struct {
 	Name        string `json:"name"`
 	Title       string `json:"title"`
@@ -30,6 +32,9 @@ type seededCase struct {
 	Path        string `json:"path,omitempty"`
 	From        int    `json:"from,omitempty"`
 	To          int    `json:"to,omitempty"`
+	// MinSeverity asks that the comment on the case's lines be at least this
+	// severe, such as high for a security problem.
+	MinSeverity string `json:"min_severity,omitempty"`
 	// CitesCoverage asks that the verdict's reason give the computed
 	// coverage of internal/ from the facts.
 	CitesCoverage bool `json:"cites_coverage,omitempty"`
@@ -58,6 +63,10 @@ func (c seededCase) validate() error {
 		return fmt.Errorf("seeded case %s needs lines from 1 up, with to no less than from", c.Name)
 	case c.Breaks == "" && (c.Path != "" || c.CitesCoverage):
 		return fmt.Errorf("seeded case %s breaks no rule, so it can expect no comment", c.Name)
+	case c.MinSeverity != "" && c.Path == "":
+		return fmt.Errorf("seeded case %s asks for a severity but names no lines for the comment", c.Name)
+	case c.MinSeverity != "" && (c.MinSeverity == severityConcern || severityRank[c.MinSeverity] == 0):
+		return fmt.Errorf("seeded case %s asks for severity %q, not critical, high, medium or low", c.Name, c.MinSeverity)
 	}
 	return nil
 }
@@ -200,14 +209,7 @@ func evaluateCommand(caseDir, reviewDir string, inputs evaluateInputs, out io.Wr
 // misses lists what the review should have said about the case and did not.
 func (c seededCase) misses(review assembledReview, coverage string) []string {
 	if c.Breaks == "" {
-		var misses []string
-		if len(review.Comments) > 0 {
-			misses = append(misses, fmt.Sprintf("the change is clean, but the review made %d comments", len(review.Comments)))
-		}
-		if failed := failedRules(review.Checklist); len(failed) > 0 {
-			misses = append(misses, "the change is clean, but the review failed "+strings.Join(failed, ", "))
-		}
-		return misses
+		return cleanMisses(review)
 	}
 
 	var misses []string
@@ -216,7 +218,7 @@ func (c seededCase) misses(review assembledReview, coverage string) []string {
 		misses = append(misses, fmt.Sprintf("the review did not fail %s (verdict %q)", c.Breaks, verdict.Verdict))
 	}
 	if c.Path != "" && !c.flaggedOnLine(review.Comments) {
-		misses = append(misses, fmt.Sprintf("no comment on %s lines %d to %d", c.Path, c.From, c.To))
+		misses = append(misses, fmt.Sprintf("no confirmed comment%s on %s lines %d to %d", c.severityWanted(), c.Path, c.From, c.To))
 	}
 	if c.CitesCoverage && (coverage == "" || !strings.Contains(verdict.Reason, strings.TrimSuffix(coverage, "%"))) {
 		misses = append(misses, fmt.Sprintf("the %s verdict does not cite the computed coverage, %s", c.Breaks, coverage))
@@ -224,16 +226,44 @@ func (c seededCase) misses(review assembledReview, coverage string) []string {
 	return misses
 }
 
-// flaggedOnLine reports whether a comment sits on the case's path, on the
-// pull request's side, between its lines.
+// cleanMisses lists what the review said about a clean change that it
+// should not have: any comment, a concern included, and any failed rule or
+// concern.
+func cleanMisses(review assembledReview) []string {
+	var misses []string
+	if len(review.Comments) > 0 {
+		misses = append(misses, fmt.Sprintf("the change is clean, but the review made %d comments", len(review.Comments)))
+	}
+	if failed := rulesWithVerdict(review.Checklist, verdictFail); len(failed) > 0 {
+		misses = append(misses, "the change is clean, but the review failed "+strings.Join(failed, ", "))
+	}
+	if doubted := rulesWithVerdict(review.Checklist, verdictConcern); len(doubted) > 0 {
+		misses = append(misses, "the change is clean, but the review raised a concern on "+strings.Join(doubted, ", "))
+	}
+	return misses
+}
+
+// flaggedOnLine reports whether a confirmed comment, at least as severe as
+// the case asks, sits on the case's path, on the pull request's side,
+// between its lines.
 func (c seededCase) flaggedOnLine(comments []geminiComment) bool {
 	for _, comment := range comments {
 		side := strings.ToUpper(strings.TrimSpace(comment.Side))
-		if comment.Path == c.Path && side != sideLeft && comment.Line >= c.From && comment.Line <= c.To {
+		if comment.Path == c.Path && side != sideLeft && comment.Line >= c.From && comment.Line <= c.To &&
+			comment.atLeast(c.MinSeverity) {
 			return true
 		}
 	}
 	return false
+}
+
+// severityWanted names the least severity the case asks for, if any, as
+// the evaluation reports it.
+func (c seededCase) severityWanted() string {
+	if c.MinSeverity == "" {
+		return ""
+	}
+	return " of " + c.MinSeverity + " or higher severity"
 }
 
 // evaluationReport is the job summary of one seeded case's review.
@@ -246,11 +276,11 @@ func evaluationReport(c seededCase, review assembledReview, decision routing, mi
 	if len(misses) > 0 {
 		outcome = "❌ missed"
 	}
-	expected := "no comment and no failed rule"
+	expected := "no comment, no failed rule and no concern"
 	if c.Breaks != "" {
 		expected = "a failed `" + c.Breaks + "`"
 		if c.Path != "" {
-			expected += fmt.Sprintf(" and a comment on `%s` lines %d to %d", c.Path, c.From, c.To)
+			expected += fmt.Sprintf(" and a confirmed comment%s on `%s` lines %d to %d", c.severityWanted(), c.Path, c.From, c.To)
 		}
 	}
 	fmt.Fprintf(&b, "### Seeded case `%s`: %s\n\n", c.Name, outcome)

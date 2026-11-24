@@ -1,0 +1,5 @@
+{
+  "title": "Keep the wait Oura asks for when it rate limits",
+  "description": "When Oura answers 429 it can say how long to wait in a Retry-After header. StatusError now carries that wait, read when it is given in whole seconds, so that the MCP tool in a later story can tell the user when to try again. Any other form of the header reads as no particular wait. Unit tests cover the client carrying the wait and each form of the header.",
+  "breaks": ""
+}

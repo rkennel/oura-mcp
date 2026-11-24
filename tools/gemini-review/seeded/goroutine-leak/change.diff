@@ -1,0 +1,48 @@
+diff --git a/internal/oura/client.go b/internal/oura/client.go
+index 5a4ce3e..1d77376 100644
+--- a/internal/oura/client.go
++++ b/internal/oura/client.go
+@@ -85,17 +85,35 @@ func NewClient(baseURL string, tokens TokenSource, httpClient Doer) *Client {
+ 	}
+ }
+ 
+-// Summaries reads both sleep collections for days and summarizes them.
++// fetched is the outcome of reading one collection.
++type fetched[T any] struct {
++	documents []T
++	err       error
++}
++
++// Summaries reads both sleep collections for days, at the same time, and
++// summarizes them.
+ func (c *Client) Summaries(ctx context.Context, days DayRange) ([]Summary, error) {
+-	daily, err := c.DailySleep(ctx, days)
+-	if err != nil {
+-		return nil, err
++	dailyDone := make(chan fetched[DailySleep])
++	sleepDone := make(chan fetched[SleepPeriod])
++	go func() {
++		documents, err := c.DailySleep(ctx, days)
++		dailyDone <- fetched[DailySleep]{documents, err}
++	}()
++	go func() {
++		documents, err := c.Sleep(ctx, days)
++		sleepDone <- fetched[SleepPeriod]{documents, err}
++	}()
++
++	daily := <-dailyDone
++	if daily.err != nil {
++		return nil, daily.err
+ 	}
+-	sleeps, err := c.Sleep(ctx, days)
+-	if err != nil {
+-		return nil, err
++	sleeps := <-sleepDone
++	if sleeps.err != nil {
++		return nil, sleeps.err
+ 	}
+-	return Summarize(days, daily, sleeps), nil
++	return Summarize(days, daily.documents, sleeps.documents), nil
+ }
+ 
+ // DailySleep returns the daily_sleep documents, which carry the sleep
