@@ -25,6 +25,7 @@ type pullRequest struct {
 	Body   string `json:"body"`
 	Head   struct {
 		SHA  string `json:"sha"`
+		Ref  string `json:"ref"` // the branch name
 		Repo struct {
 			FullName string `json:"full_name"` // owner/name; empty when the repository was deleted
 		} `json:"repo"`
@@ -64,6 +65,27 @@ func (c *githubClient) pullRequest(ctx context.Context, number int) (pullRequest
 func (c *githubClient) diff(ctx context.Context, number int) (string, error) {
 	body, err := c.do(ctx, http.MethodGet, c.pullPath(number, ""), "application/vnd.github.diff", nil)
 	return string(body), err
+}
+
+// firstCommitMessage returns the message of the pull request's first
+// commit, or "" when it has none.
+func (c *githubClient) firstCommitMessage(ctx context.Context, number int) (string, error) {
+	body, err := c.do(ctx, http.MethodGet, c.pullPath(number, "/commits?per_page=1"), "application/vnd.github+json", nil)
+	if err != nil {
+		return "", err
+	}
+	var commits []struct {
+		Commit struct {
+			Message string `json:"message"`
+		} `json:"commit"`
+	}
+	if err := json.Unmarshal(body, &commits); err != nil {
+		return "", fmt.Errorf("decode the commits of pull request %d: %w", number, err)
+	}
+	if len(commits) == 0 {
+		return "", nil
+	}
+	return commits[0].Commit.Message, nil
 }
 
 // createReview posts a submitted review and returns its web address.

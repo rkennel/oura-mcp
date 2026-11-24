@@ -5,8 +5,9 @@
 //
 //	gemini-review origin    says whether the pull request comes from a branch
 //	                        in this repository, and so whether the review runs
-//	gemini-review prepare   writes the pull request and its line-numbered diff
-//	                        for Gemini to read
+//	gemini-review prepare   writes the pull request, its line-numbered diff
+//	                        and the Jira story it implements for Gemini to
+//	                        read
 //	gemini-review standards checks the mechanical rules of GEMINI.md against
 //	                        the repository and a diff, and fails on a breach
 //	gemini-review facts     writes the facts CI worked out for Gemini to read
@@ -22,18 +23,21 @@
 //	gemini-review evaluate  checks the review of a seeded case against what
 //	                        the case expects, and fails if it missed
 //
-// Settings come from the environment. All commands but origin, standards,
-// prompt and cases use REVIEW_DIR, the directory they share. origin, prepare
-// and post use GITHUB_TOKEN, GITHUB_REPOSITORY, GITHUB_API_URL (default
-// https://api.github.com) and PR_NUMBER. standards reads DIFF_FILE and the
-// repository at REPO_ROOT (default the working directory), and writes its
-// result to STANDARDS_RESULT when set. facts reads COVERAGE_MIN (default
-// 85). route reads the routing file named by ROUTING_CONFIG. decide reads
-// TRIAGE_REPLY and TRIAGE_OUTPUT when triage ran, and post and evaluate read
-// GEMINI_REPLY and GEMINI_OUTPUT: the model's answer and Gemini CLI's JSON
-// output, which shows the model that answered. prompt, post and evaluate
-// read the rules from STANDARDS_FILE (default GEMINI.md). cases reads
-// SEEDED_DIR, and seed and evaluate read the case at SEEDED_CASE. Commands write step outputs to
+// Settings come from the environment. All commands but origin, standards
+// and cases use REVIEW_DIR, the directory they share; prompt reads the story
+// there when it is set. origin, prepare and post use GITHUB_TOKEN,
+// GITHUB_REPOSITORY, GITHUB_API_URL (default https://api.github.com) and
+// PR_NUMBER. prepare reads the story the pull request implements from Jira
+// with JIRA_BASE_URL, JIRA_EMAIL and JIRA_API_TOKEN, and goes without it
+// when they are not all set. standards reads DIFF_FILE and the repository at
+// REPO_ROOT (default the working directory), and writes its result to
+// STANDARDS_RESULT when set. facts reads COVERAGE_MIN (default 85). route
+// reads the routing file named by ROUTING_CONFIG. decide reads TRIAGE_REPLY
+// and TRIAGE_OUTPUT when triage ran, and post and evaluate read GEMINI_REPLY
+// and GEMINI_OUTPUT: the model's answer and Gemini CLI's JSON output, which
+// shows the model that answered. prompt, post and evaluate read the rules
+// from STANDARDS_FILE (default GEMINI.md). cases reads SEEDED_DIR, and seed
+// and evaluate read the case at SEEDED_CASE. Commands write step outputs to
 // GITHUB_OUTPUT and add to GITHUB_STEP_SUMMARY where Actions sets them.
 package main
 
@@ -70,6 +74,7 @@ func main() {
 
 type config struct {
 	client    *githubClient
+	jira      *jiraClient // nil when the Jira settings are not all set
 	prNumber  int
 	reviewDir string
 }
@@ -100,7 +105,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, httpCli
 	case "standards":
 		return standardsCommand(withDefault(getenv("REPO_ROOT"), "."), getenv("DIFF_FILE"), getenv("STANDARDS_RESULT"), out)
 	case "prompt":
-		return promptCommand(standardsFile(getenv), getenv("GITHUB_OUTPUT"), out)
+		return promptCommand(standardsFile(getenv), getenv("REVIEW_DIR"), getenv("GITHUB_OUTPUT"), out)
 	case "cases":
 		return casesCommand(getenv("SEEDED_DIR"), getenv("GITHUB_OUTPUT"), out)
 	default:
@@ -164,6 +169,7 @@ func loadConfig(getenv func(string) string, httpClient *http.Client) (config, er
 		return config{}, errors.New("missing environment: REVIEW_DIR")
 	}
 	cfg.reviewDir = getenv("REVIEW_DIR")
+	cfg.jira = newJiraClient(getenv, httpClient)
 	return cfg, nil
 }
 
@@ -225,8 +231,48 @@ func prepare(ctx context.Context, cfg config, out io.Writer) error {
 			return fmt.Errorf("write %s: %w", name, err)
 		}
 	}
-	fmt.Fprintf(out, "Prepared pull request #%d at %s: %d files changed.\n", pr.Number, shortSHA(pr.Head.SHA), len(files))
+	implemented := lookUpStory(ctx, cfg, pr)
+	if err := writeStory(cfg.reviewDir, implemented); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Prepared pull request #%d at %s: %d files changed. %s\n", pr.Number, shortSHA(pr.Head.SHA), len(files), storyStatus(implemented))
 	return nil
+}
+
+// lookUpStory finds the story the pull request implements and reads it from
+// Jira. Failing to find it is not an error: the review still runs, and says
+// why it had no acceptance criteria to check the change against.
+func lookUpStory(ctx context.Context, cfg config, pr pullRequest) story {
+	key := storyKeyIn(pr.Title, titleKey)
+	if key == "" {
+		key = storyKeyIn(pr.Head.Ref, branchKey)
+	}
+	if key == "" {
+		message, err := cfg.client.firstCommitMessage(ctx, cfg.prNumber)
+		if err != nil {
+			return unavailableStory("", fmt.Sprintf("the pull request's title and branch name name no story, and its first commit could not be read (%v)", err))
+		}
+		key = storyKeyIn(message, titleKey)
+	}
+	if key == "" {
+		return unavailableStory("", "no story key such as KAN-21 starts the pull request's title or first commit message, or a part of its branch name")
+	}
+	if cfg.jira == nil {
+		return unavailableStory(key, fmt.Sprintf("story %s was not read because the review has no Jira access (JIRA_BASE_URL, JIRA_EMAIL and JIRA_API_TOKEN are not all set)", key))
+	}
+	implemented, err := cfg.jira.story(ctx, key)
+	if err != nil {
+		return unavailableStory(key, fmt.Sprintf("story %s could not be read from Jira: %v", key, err))
+	}
+	return implemented
+}
+
+// storyStatus says in a line what prepare found about the story.
+func storyStatus(s story) string {
+	if s.available() {
+		return fmt.Sprintf("Story %s has %d acceptance criteria.", s.Key, len(s.Criteria))
+	}
+	return "No acceptance criteria: " + s.Unavailable + "."
 }
 
 func pullRequestDocument(repo string, pr pullRequest, files []fileDiff) string {
@@ -297,8 +343,9 @@ func post(ctx context.Context, cfg config, inputs reviewInputs, out io.Writer) e
 	return appendFile(inputs.summary, fmt.Sprintf("### Gemini review posted\n\n%s\n\n%d line comments: %s\n", note, len(request.Comments), url))
 }
 
-// assembleFromDir joins Gemini's reply with the rules in standardsFile and
-// the standards check's result that the facts step left in reviewDir.
+// assembleFromDir joins Gemini's reply with the rules in standardsFile, the
+// standards check's result that the facts step left in reviewDir and the
+// story prepare left there.
 func assembleFromDir(reply geminiReview, standardsFile, reviewDir string) (assembledReview, error) {
 	rules, err := loadRules(standardsFile)
 	if err != nil {
@@ -308,5 +355,16 @@ func assembleFromDir(reply geminiReview, standardsFile, reviewDir string) (assem
 	if err != nil {
 		return assembledReview{}, err
 	}
-	return assembleReview(reply, rules, standards)
+	implemented, err := readStory(reviewDir)
+	if err != nil {
+		return assembledReview{}, err
+	}
+	review, err := assembleReview(reply, rules, standards)
+	if err != nil {
+		return assembledReview{}, err
+	}
+	if review.Story, err = assessStory(implemented, reply.Story); err != nil {
+		return assembledReview{}, err
+	}
+	return review, nil
 }

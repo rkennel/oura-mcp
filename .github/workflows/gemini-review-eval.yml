@@ -9,7 +9,9 @@ name: Gemini review seeded defects
 # against what the case expects. Nothing is posted anywhere. The run is red
 # when any case is missed: a rule not failed, no confirmed comment on the
 # case's lines, a coverage verdict that does not cite the computed figure, or
-# a comment, concern or failed rule on a clean case. Each job's summary shows the review it got.
+# a comment, concern or failed rule on a clean case, or a story's criteria
+# or changes outside it judged otherwise than the case expects. Each job's
+# summary shows the review it got.
 #
 # It spends Gemini API calls, so it runs by hand: after a change to the
 # review prompt, the routing in .github/gemini-review.json, the model IDs or

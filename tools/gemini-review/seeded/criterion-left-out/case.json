@@ -1,0 +1,17 @@
+{
+  "title": "KAN-90: Make the date range's errors say what was asked for",
+  "description": "NewDayRange now names both dates when a range ends before it starts, with a test.",
+  "breaks": "",
+  "story": {
+    "key": "KAN-90",
+    "summary": "Make the date range's errors say what was asked for",
+    "description": "**As** the developer of the Oura MCP server,\n\n**I want** NewDayRange's errors to say what was asked for,\n\n**So that** a bad request to get_sleep_summary can be fixed from its error alone.\n\n## Scope\n\n- Name both dates in the error for a reversed range.\n- Refuse a range longer than 31 days, so one request cannot page through years of Oura data.\n\n## Acceptance criteria\n\n**Given** a date range whose last day is before its first day\n**When** NewDayRange is called\n**Then** it returns an error that names both dates and still matches the reversed-range error with errors.Is\n\n**Given** a date range of more than 31 days\n**When** NewDayRange is called\n**Then** it returns an error that says the range is too long and names the 31-day limit",
+    "criteria": [
+      "**Given** a date range whose last day is before its first day\n**When** NewDayRange is called\n**Then** it returns an error that names both dates and still matches the reversed-range error with errors.Is",
+      "**Given** a date range of more than 31 days\n**When** NewDayRange is called\n**Then** it returns an error that says the range is too long and names the 31-day limit"
+    ]
+  },
+  "unmet": [
+    "AC2"
+  ]
+}
