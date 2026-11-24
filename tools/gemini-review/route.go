@@ -29,6 +29,9 @@ type routingConfig struct {
 	HighRiskLineThreshold int            `json:"high_risk_line_threshold"`
 	CriticalPaths         []criticalPath `json:"critical_paths"`
 	SharedPackages        []string       `json:"shared_packages"`
+	// BlockingSeverity is the least severity of a confirmed finding that
+	// holds a merge until it is fixed or dismissed; the gate reads it.
+	BlockingSeverity string `json:"blocking_severity"`
 }
 
 // criticalPath is a path pattern whose changes always get the high-risk
@@ -66,6 +69,9 @@ func (cfg routingConfig) validate() error {
 	}
 	if cfg.HighRiskLineThreshold <= 0 {
 		problems = append(problems, "high_risk_line_threshold must be a positive number of lines")
+	}
+	if !isConfirmedSeverity(cfg.BlockingSeverity) {
+		problems = append(problems, fmt.Sprintf("blocking_severity is %q, not critical, high, medium or low", cfg.BlockingSeverity))
 	}
 	for i, critical := range cfg.CriticalPaths {
 		if strings.TrimSpace(critical.Why) == "" {

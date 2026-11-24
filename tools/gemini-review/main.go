@@ -17,19 +17,25 @@
 //	                        model that reviews
 //	gemini-review prompt    writes the review prompt, with GEMINI.md's rules
 //	gemini-review post      posts Gemini's reply as a review, or fails
+//	gemini-review gate      sets the Gemini findings status on the pull
+//	                        request's head commit from its review and the
+//	                        repository owner's dismissals
 //	gemini-review cases     lists the seeded cases, for a matrix of jobs
 //	gemini-review seed      writes a seeded case as prepare writes a pull
 //	                        request
 //	gemini-review evaluate  checks the review of a seeded case against what
 //	                        the case expects, and fails if it missed
 //
-// Settings come from the environment. All commands but origin, standards
-// and cases use REVIEW_DIR, the directory they share; prompt reads the story
-// there when it is set. origin, prepare and post use GITHUB_TOKEN,
+// Settings come from the environment. All commands but origin, standards,
+// gate and cases use REVIEW_DIR, the directory they share; prompt reads the
+// story there when it is set. origin, prepare, post and gate use GITHUB_TOKEN,
 // GITHUB_REPOSITORY, GITHUB_API_URL (default https://api.github.com) and
 // PR_NUMBER. prepare reads the story the pull request implements from Jira
 // with JIRA_BASE_URL, JIRA_EMAIL and JIRA_API_TOKEN, and goes without it
-// when they are not all set. standards reads DIFF_FILE and the repository at
+// when they are not all set. gate reads blocking_severity from the routing
+// file named by ROUTING_CONFIG (default .github/gemini-review.json) and
+// links its status to the run built from GITHUB_SERVER_URL and
+// GITHUB_RUN_ID. standards reads DIFF_FILE and the repository at
 // REPO_ROOT (default the working directory), and writes its result to
 // STANDARDS_RESULT when set. facts reads COVERAGE_MIN (default 85). route
 // reads the routing file named by ROUTING_CONFIG. decide reads TRIAGE_REPLY
@@ -102,6 +108,15 @@ func run(ctx context.Context, args []string, getenv func(string) string, httpCli
 			reply: getenv("GEMINI_REPLY"), cliOutput: getenv("GEMINI_OUTPUT"),
 			standardsFile: standardsFile(getenv), summary: getenv("GITHUB_STEP_SUMMARY"),
 		}, out)
+	case "gate":
+		cfg, err := loadClientConfig(getenv, httpClient)
+		if err != nil {
+			return err
+		}
+		return gateCommand(ctx, cfg, gateSettings{
+			routingConfig: withDefault(getenv("ROUTING_CONFIG"), ".github/gemini-review.json"),
+			summary:       getenv("GITHUB_STEP_SUMMARY"), runURL: runURL(getenv),
+		}, out)
 	case "standards":
 		return standardsCommand(withDefault(getenv("REPO_ROOT"), "."), getenv("DIFF_FILE"), getenv("STANDARDS_RESULT"), out)
 	case "prompt":
@@ -113,7 +128,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, httpCli
 	}
 }
 
-var commandNames = []string{"origin", "prepare", "standards", "facts", "route", "decide", "prompt", "post", "cases", "seed", "evaluate"}
+var commandNames = []string{"origin", "prepare", "standards", "facts", "route", "decide", "prompt", "post", "gate", "cases", "seed", "evaluate"}
 
 // runStepCommand runs the commands that work only in REVIEW_DIR.
 func runStepCommand(name string, getenv func(string) string, out io.Writer) error {

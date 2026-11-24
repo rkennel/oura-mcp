@@ -26,5 +26,6 @@
   ],
   "shared_packages": [
     "internal/**"
-  ]
+  ],
+  "blocking_severity": "high"
 }

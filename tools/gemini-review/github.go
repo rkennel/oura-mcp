@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 // githubClient makes the few GitHub REST calls the review needs.
@@ -105,6 +106,99 @@ func (c *githubClient) createReview(ctx context.Context, number int, review revi
 		return "", fmt.Errorf("decode created review: %w", err)
 	}
 	return created.HTMLURL, nil
+}
+
+// githubUser is the author of a review or comment.
+type githubUser struct {
+	Login string `json:"login"`
+}
+
+// githubReview is a review on a pull request, as GitHub lists it.
+type githubReview struct {
+	ID          int64      `json:"id"`
+	User        githubUser `json:"user"`
+	Body        string     `json:"body"`
+	CommitID    string     `json:"commit_id"`
+	HTMLURL     string     `json:"html_url"`
+	SubmittedAt time.Time  `json:"submitted_at"` // zero for a review not yet submitted
+}
+
+// githubComment is a comment on a pull request: a line comment of a review,
+// a reply in its thread, or a comment in the conversation.
+type githubComment struct {
+	ID          int64      `json:"id"`
+	InReplyToID int64      `json:"in_reply_to_id"` // the thread's first comment; 0 when it starts one or is in the conversation
+	User        githubUser `json:"user"`
+	Body        string     `json:"body"`
+	HTMLURL     string     `json:"html_url"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
+
+// commitStatus is the body of GitHub's "create a commit status" call.
+type commitStatus struct {
+	State       string `json:"state"` // success or failure
+	Description string `json:"description"`
+	Context     string `json:"context"`
+	TargetURL   string `json:"target_url,omitempty"`
+}
+
+// reviews lists the pull request's reviews, oldest first.
+func (c *githubClient) reviews(ctx context.Context, number int) ([]githubReview, error) {
+	return listAll[githubReview](ctx, c, c.pullPath(number, "/reviews"))
+}
+
+// reviewComments lists the line comments a review posted.
+func (c *githubClient) reviewComments(ctx context.Context, number int, reviewID int64) ([]githubComment, error) {
+	return listAll[githubComment](ctx, c, c.pullPath(number, fmt.Sprintf("/reviews/%d/comments", reviewID)))
+}
+
+// lineComments lists every line comment on the pull request, replies
+// included.
+func (c *githubClient) lineComments(ctx context.Context, number int) ([]githubComment, error) {
+	return listAll[githubComment](ctx, c, c.pullPath(number, "/comments"))
+}
+
+// conversationComments lists the comments in the pull request's
+// conversation, which GitHub keeps as the comments of its issue.
+func (c *githubClient) conversationComments(ctx context.Context, number int) ([]githubComment, error) {
+	return listAll[githubComment](ctx, c, fmt.Sprintf("/repos/%s/issues/%d/comments", c.repo, number))
+}
+
+// createStatus sets a commit status on sha.
+func (c *githubClient) createStatus(ctx context.Context, sha string, status commitStatus) error {
+	payload, err := json.Marshal(status)
+	if err != nil {
+		return fmt.Errorf("encode commit status: %w", err)
+	}
+	_, err = c.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/statuses/%s", c.repo, sha), "application/vnd.github+json", payload)
+	return err
+}
+
+// Lists are read a page at a time. maxPages bounds a list that never ends,
+// far beyond what a pull request has.
+const (
+	pageSize = 100
+	maxPages = 50
+)
+
+// listAll reads every page of a GitHub list at path.
+func listAll[T any](ctx context.Context, c *githubClient, path string) ([]T, error) {
+	var all []T
+	for page := 1; page <= maxPages; page++ {
+		body, err := c.do(ctx, http.MethodGet, fmt.Sprintf("%s?per_page=%d&page=%d", path, pageSize, page), "application/vnd.github+json", nil)
+		if err != nil {
+			return nil, err
+		}
+		var items []T
+		if err := json.Unmarshal(body, &items); err != nil {
+			return nil, fmt.Errorf("decode %s page %d: %w", path, page, err)
+		}
+		all = append(all, items...)
+		if len(items) < pageSize {
+			return all, nil
+		}
+	}
+	return nil, fmt.Errorf("%s has more than %d pages", path, maxPages)
 }
 
 func (c *githubClient) pullPath(number int, suffix string) string {

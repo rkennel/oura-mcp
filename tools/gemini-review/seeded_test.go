@@ -264,7 +264,7 @@ func TestEvaluatePassesAReviewThatCaughtTheDefect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("evaluate: %v", err)
 	}
-	if !strings.Contains(out, "✅ caught") || !strings.Contains(out, "`new.go` line 3: Wrap the error.") {
+	if !strings.Contains(out, "✅ caught") || !strings.Contains(out, "`new.go` line 3: **F1** Wrap the error.") {
 		t.Errorf("report = %q", out)
 	}
 }

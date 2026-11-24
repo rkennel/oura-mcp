@@ -294,7 +294,7 @@ func TestPostFallsBackToTheBodyWhenGitHubRejectsTheLines(t *testing.T) {
 	}
 
 	if len(fake.reviews) != 1 || len(fake.reviews[0].Comments) != 0 ||
-		!strings.Contains(fake.reviews[0].Body, "`internal/app/config.go` line 12: Problem.") {
+		!strings.Contains(fake.reviews[0].Body, "`internal/app/config.go` line 12: **F1** Problem.") {
 		t.Errorf("reviews = %+v, want one review with the comment in its body", fake.reviews)
 	}
 	if !strings.Contains(out, "::warning") || !strings.Contains(out, "0 line comments") {

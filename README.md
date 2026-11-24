@@ -17,7 +17,7 @@ and deployed as a container on Google Cloud Run.
 | `e2e/fakeoura` | A fake Oura API that the end-to-end environment runs as its own container. |
 | `scripts/` | The CI stages, runnable locally, the scripts that run the server on your machine, and the deploy. |
 | `docs/` | Guides, such as the Google Cloud setup and deploy. |
-| `tools/gemini-review` | Fetches a pull request and the Jira story it implements for the Gemini review, picks the model, works out the facts it reviews with, checks the mechanical rules of `GEMINI.md`, and posts Gemini's reply. Its own Go module. |
+| `tools/gemini-review` | Fetches a pull request and the Jira story it implements for the Gemini review, picks the model, works out the facts it reviews with, checks the mechanical rules of `GEMINI.md`, posts Gemini's reply, and sets the status that holds a merge on serious findings. Its own Go module. |
 | `tools/gemini-review/seeded` | Seeded-defect cases: known changes that each break one rule of `GEMINI.md`, or none, for proving the review catches them. |
 | `.github/actions/gemini-review` | The review steps (routing, triage, prompt, Gemini) shared by the pull request review and the seeded-defect run. |
 | `Dockerfile` | The production image. |
@@ -306,6 +306,55 @@ comments carry a severity of critical, high, medium or low, and a breach of
 a security rule is critical or high. A review whose only findings are
 concerns opens with "No confirmed issues." so a doubt is not read as a
 defect.
+
+### Serious findings hold the merge
+
+Each comment in the review is numbered, `F1` onwards, in its label, such as
+`[HIGH] F2`, and the review records its findings in a hidden marker. Once
+the review job ends, passed or failed, `.github/workflows/gemini-findings.yml`
+runs `gemini-review gate`, which sets the **Gemini findings** commit status on
+the pull request's head commit:
+
+- **Red** while a confirmed finding at `blocking_severity` or above is open.
+  `blocking_severity` is in `.github/gemini-review.json`; it is `high`, so
+  critical and high findings hold the merge and medium, low, concerns and
+  the standards check's comments do not (the standards check fails CI on
+  its own).
+- **Red** when the head commit has no review, such as when Gemini failed:
+  the status then says that there is no review, not that there are no
+  findings. The review check is red too, so an outage and a finding stay
+  apart.
+- **Green** otherwise.
+
+Only the review of the head commit counts: a finding on an earlier push that
+a later push fixed holds nothing, and each push is judged afresh. The status
+links to the run, whose summary lists the open findings, the dismissed ones
+with their reasons, and any dismissal it did not apply and why.
+
+**Dismissing a finding.** Only the repository owner may dismiss a finding,
+when it is wrong or the risk is accepted. Reply in the finding's thread with
+`/dismiss` and the reason:
+
+```
+/dismiss The token in this log line is the fake Oura API's, not a real one.
+```
+
+A finding that could not go on a line is listed in the review under
+"Comments outside the diff" and has no thread. Dismiss it in the pull
+request's conversation by naming it: `/dismiss F3 <reason>`. A dismissal with
+no reason, or from anyone else, is not applied, and the summary says so. The
+comment is the record of the dismissal: editing or deleting it runs the gate
+again, and a later dismissal of the same finding replaces an earlier one. A
+dismissal answers one review, so a finding that comes back after a new push
+needs dismissing again.
+
+**Making it required.** The status only holds the merge once branch
+protection requires it. That is the repository owner's setting: in Settings,
+Branches, add or edit the rule for `main`, tick "Require status checks to
+pass before merging", search for **Gemini findings** and add it. GitHub
+offers it once the status has been set on a commit, so after the first
+review that runs with this workflow. On a private repository, GitHub
+enforces branch protection only on a paid plan.
 
 ### Reviewing against the story
 

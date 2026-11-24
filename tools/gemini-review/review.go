@@ -20,6 +20,7 @@ type geminiComment struct {
 	Side     string `json:"side"`
 	Severity string `json:"severity"`
 	Body     string `json:"body"`
+	ID       string `json:"-"` // F1 onwards, given when the review is assembled
 }
 
 // reviewRequest is the body of GitHub's "create a review" call.
@@ -99,6 +100,12 @@ func (c geminiComment) isConcern() bool {
 	return c.Severity == severityConcern
 }
 
+// isConfirmedSeverity reports whether severity is one a confirmed finding
+// can have: any but a concern.
+func isConfirmedSeverity(severity string) bool {
+	return severity != severityConcern && severityRank[severity] > 0
+}
+
 // atLeast reports whether the comment is confirmed and at least as severe
 // as severity.
 func (c geminiComment) atLeast(severity string) bool {
@@ -173,22 +180,24 @@ func reviewBody(review assembledReview, unplaced []geminiComment, commitID, mode
 	if modelNote != "" {
 		b.WriteString(modelNote + "\n\n")
 	}
-	fmt.Fprintf(&b, "<sub>Gemini CLI review of %s.</sub>", shortSHA(commitID))
+	fmt.Fprintf(&b, "<sub>Gemini CLI review of %s.</sub>\n\n", shortSHA(commitID))
+	b.WriteString(findingsMarker(review.Comments))
 	return b.String()
 }
 
-// withSeverity labels the comment's body with its severity, and marks a
-// concern as unconfirmed.
+// withSeverity labels the comment's body with its severity and ID, and
+// marks a concern as unconfirmed. The gate reads the ID back from the label
+// to tell which finding a reply is about.
 func withSeverity(comment geminiComment) string {
-	severity := strings.ToUpper(strings.TrimSpace(comment.Severity))
+	label := findingLabel(comment)
 	body := strings.TrimSpace(comment.Body)
 	switch {
-	case severity == "":
+	case label == "":
 		return body
 	case comment.isConcern():
-		return fmt.Sprintf("**[%s]** %s %s", severity, concernNote, body)
+		return fmt.Sprintf("%s %s %s", label, concernNote, body)
 	default:
-		return fmt.Sprintf("**[%s]** %s", severity, body)
+		return fmt.Sprintf("%s %s", label, body)
 	}
 }
 

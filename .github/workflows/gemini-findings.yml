@@ -1,0 +1,75 @@
+name: Gemini findings
+on:
+  # After each review: gemini-code-review.yml calls this once the review job
+  # has finished, passed or failed.
+  workflow_call:
+    inputs:
+      pr_number:
+        description: 'Number of the pull request whose findings to report'
+        required: true
+        type: string
+  # When the repository owner dismisses a finding, or takes a dismissal back.
+  issue_comment:
+    types: [created, edited, deleted]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+
+# How it works: `gemini-review gate` reads the latest review that the review
+# workflow posted on the pull request's head commit, with its findings, and
+# every `/dismiss` comment the repository owner wrote since. It sets the
+# "Gemini findings" commit status on the head commit: failure while a
+# confirmed finding at blocking_severity (.github/gemini-review.json) or
+# above is open, or when the head commit has no review at all, and success
+# otherwise. The job summary lists the open findings, the dismissed ones with
+# their reasons and any dismissal it did not apply. Branch protection
+# requires the status, not this job: a run started by a comment is attached
+# to the default branch rather than to the pull request, so only a status on
+# the head commit can turn green when a finding is dismissed. The job itself
+# fails only when it cannot reach a verdict.
+#
+# It runs no code from a fork with a token that can write: a comment run
+# builds the default branch's tool, and a fork's pull request runs get a
+# read-only token. It needs no secrets.
+jobs:
+  gate:
+    name: Set the Gemini findings status
+    # A comment run only for a comment on a pull request that is, or was
+    # before an edit, a dismissal.
+    if: >-
+      inputs.pr_number ||
+      ((github.event_name == 'pull_request_review_comment' || github.event.issue.pull_request) &&
+       (contains(github.event.comment.body, '/dismiss') || contains(github.event.changes.body.from, '/dismiss')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      statuses: write
+    # The latest run reads every dismissal, so runs for one pull request
+    # queue rather than overlap.
+    concurrency:
+      group: gemini-findings-${{ inputs.pr_number || github.event.issue.number || github.event.pull_request.number }}
+      cancel-in-progress: false
+    env:
+      PR_NUMBER: ${{ inputs.pr_number || github.event.issue.number || github.event.pull_request.number }}
+    steps:
+      - name: Checkout the workflow's commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: tools/gemini-review/go.mod
+          cache: false
+
+      - name: Build the review tool
+        working-directory: tools/gemini-review
+        run: go build -o "${RUNNER_TEMP}/gemini-review" .
+
+      - name: Set the status from the review and its dismissals
+        run: '"${RUNNER_TEMP}/gemini-review" gate'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ROUTING_CONFIG: .github/gemini-review.json
