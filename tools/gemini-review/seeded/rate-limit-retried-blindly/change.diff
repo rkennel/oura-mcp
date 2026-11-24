@@ -1,0 +1,53 @@
+diff --git a/internal/oura/client.go b/internal/oura/client.go
+index 5a4ce3e..07908ab 100644
+--- a/internal/oura/client.go
++++ b/internal/oura/client.go
+@@ -155,6 +155,12 @@ func readPage[T dated](ctx context.Context, c *Client, collection string, days D
+ 	}
+ 	defer func() { _ = response.Body.Close() }()
+ 
++	if response.StatusCode == http.StatusTooManyRequests {
++		// Oura's rate limit clears quickly, so wait a moment and ask again
++		// rather than fail the caller's request.
++		time.Sleep(time.Second)
++		return readPage[T](ctx, c, collection, days, nextToken)
++	}
+ 	if response.StatusCode != http.StatusOK {
+ 		return page[T]{}, statusError(collection, response)
+ 	}
+diff --git a/internal/oura/client_test.go b/internal/oura/client_test.go
+index a188350..9626e4a 100644
+--- a/internal/oura/client_test.go
++++ b/internal/oura/client_test.go
+@@ -246,7 +246,6 @@ func TestClientSurfacesOurasErrorStatus(t *testing.T) {
+ 		wantDetail string
+ 	}{
+ 		{"expired token", http.StatusUnauthorized, `{"detail": "Invalid or expired authentication token."}`, "Invalid or expired authentication token."},
+-		{"rate limited", http.StatusTooManyRequests, `{"detail": "Rate limit exceeded"}`, "Rate limit exceeded"},
+ 		{"outage, no body", http.StatusServiceUnavailable, ``, "Service Unavailable"},
+ 		{"validation error, detail not text", http.StatusUnprocessableEntity, `{"detail": [{"msg": "bad date"}]}`, "Unprocessable Entity"},
+ 	}
+@@ -268,6 +267,23 @@ func TestClientSurfacesOurasErrorStatus(t *testing.T) {
+ 	}
+ }
+ 
++func TestClientAsksAgainWhenOuraRateLimitsIt(t *testing.T) {
++	calls := 0
++	oura := &fakeOura{respond: func(*http.Request) (*http.Response, error) {
++		calls++
++		if calls == 1 {
++			return answer(http.StatusTooManyRequests, `{"detail": "Rate limit exceeded"}`), nil
++		}
++		return answer(http.StatusOK, `{"data": [{"day": "2026-11-01", "score": 82}], "next_token": null}`), nil
++	}}
++
++	documents, err := newTestClient(oura).DailySleep(t.Context(), mustDays(t, "2026-11-01", "2026-11-01"))
++
++	if err != nil || len(documents) != 1 || len(oura.requests) != 2 {
++		t.Errorf("documents = %+v, err = %v after %d requests; want one document after two", documents, err, len(oura.requests))
++	}
++}
++
+ func TestClientTimesOutWhenOuraDoesNotAnswer(t *testing.T) {
+ 	oura := &fakeOura{respond: func(request *http.Request) (*http.Response, error) {
+ 		<-request.Context().Done()

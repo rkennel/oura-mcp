@@ -1,0 +1,8 @@
+{
+  "title": "Read both sleep collections at the same time",
+  "description": "Summaries read daily_sleep and then sleep, one after the other, so each summary waited for two round trips to Oura. It now reads them at the same time and returns the first error it meets. The existing Summaries tests, for both collections and for a failure in either, pass unchanged.",
+  "breaks": "goroutine-lifecycle",
+  "path": "internal/oura/client.go",
+  "from": 103,
+  "to": 110
+}

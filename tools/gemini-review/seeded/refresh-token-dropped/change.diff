@@ -1,0 +1,178 @@
+diff --git a/internal/oura/tokens.go b/internal/oura/tokens.go
+new file mode 100644
+index 0000000..f9ba55f
+--- /dev/null
++++ b/internal/oura/tokens.go
+@@ -0,0 +1,73 @@
++package oura
++
++import (
++	"context"
++	"fmt"
++	"time"
++)
++
++// TokenPair is an Oura access token, when it expires, and the refresh
++// token that renews it.
++type TokenPair struct {
++	Access  string
++	Refresh string
++	Expiry  time.Time
++}
++
++// TokenStore keeps the current token pair, such as in Secret Manager.
++type TokenStore interface {
++	Load(ctx context.Context) (TokenPair, error)
++	Save(ctx context.Context, pair TokenPair) error
++	Delete(ctx context.Context) error
++}
++
++// Refresher exchanges a refresh token for a new pair at Oura's token
++// endpoint.
++type Refresher interface {
++	Refresh(ctx context.Context, refreshToken string) (TokenPair, error)
++}
++
++// RotatingTokens is a TokenSource that renews the access token once it has
++// expired.
++type RotatingTokens struct {
++	store     TokenStore
++	refresher Refresher
++	now       func() time.Time
++}
++
++// NewRotatingTokens returns a TokenSource that keeps its tokens in store and
++// renews them with refresher.
++func NewRotatingTokens(store TokenStore, refresher Refresher) *RotatingTokens {
++	return &RotatingTokens{store: store, refresher: refresher, now: time.Now}
++}
++
++// AccessToken returns a current access token, renewing the pair first when
++// the access token has expired.
++func (t *RotatingTokens) AccessToken(ctx context.Context) (string, error) {
++	pair, err := t.store.Load(ctx)
++	if err != nil {
++		return "", fmt.Errorf("load the oura tokens: %w", err)
++	}
++	if t.now().Before(pair.Expiry) {
++		return pair.Access, nil
++	}
++	return t.rotate(ctx, pair)
++}
++
++// rotate exchanges pair's refresh token for a new pair and keeps the new
++// one.
++func (t *RotatingTokens) rotate(ctx context.Context, pair TokenPair) (string, error) {
++	// The old pair is spent as soon as Oura answers, so clear it first
++	// rather than leave a stale refresh token in the store.
++	if err := t.store.Delete(ctx); err != nil {
++		return "", fmt.Errorf("clear the old oura tokens: %w", err)
++	}
++	fresh, err := t.refresher.Refresh(ctx, pair.Refresh)
++	if err != nil {
++		return "", fmt.Errorf("refresh the oura tokens: %w", err)
++	}
++	if err := t.store.Save(ctx, fresh); err != nil {
++		return "", fmt.Errorf("save the new oura tokens: %w", err)
++	}
++	return fresh.Access, nil
++}
+diff --git a/internal/oura/tokens_test.go b/internal/oura/tokens_test.go
+new file mode 100644
+index 0000000..7af4f71
+--- /dev/null
++++ b/internal/oura/tokens_test.go
+@@ -0,0 +1,93 @@
++package oura
++
++import (
++	"context"
++	"errors"
++	"slices"
++	"testing"
++	"time"
++)
++
++var tokenTestNow = time.Date(2026, 11, 24, 9, 0, 0, 0, time.UTC)
++
++// memoryStore is a TokenStore that keeps the pair in memory and records
++// what was done to it.
++type memoryStore struct {
++	pair  TokenPair
++	calls []string
++}
++
++func (m *memoryStore) Load(context.Context) (TokenPair, error) {
++	m.calls = append(m.calls, "load")
++	return m.pair, nil
++}
++
++func (m *memoryStore) Save(_ context.Context, pair TokenPair) error {
++	m.calls = append(m.calls, "save")
++	m.pair = pair
++	return nil
++}
++
++func (m *memoryStore) Delete(context.Context) error {
++	m.calls = append(m.calls, "delete")
++	m.pair = TokenPair{}
++	return nil
++}
++
++// fakeRefresher answers every refresh with pair, or err.
++type fakeRefresher struct {
++	pair TokenPair
++	err  error
++	got  []string
++}
++
++func (f *fakeRefresher) Refresh(_ context.Context, refreshToken string) (TokenPair, error) {
++	f.got = append(f.got, refreshToken)
++	return f.pair, f.err
++}
++
++func newTestTokens(store TokenStore, refresher Refresher) *RotatingTokens {
++	tokens := NewRotatingTokens(store, refresher)
++	tokens.now = func() time.Time { return tokenTestNow }
++	return tokens
++}
++
++func TestAccessTokenReturnsAnUnexpiredTokenAsItIs(t *testing.T) {
++	store := &memoryStore{pair: TokenPair{Access: "current", Refresh: "r1", Expiry: tokenTestNow.Add(time.Hour)}}
++	refresher := &fakeRefresher{}
++
++	token, err := newTestTokens(store, refresher).AccessToken(t.Context())
++
++	if err != nil || token != "current" || len(refresher.got) != 0 {
++		t.Errorf("token = %q, err = %v, refreshes = %v; want the current token and no refresh", token, err, refresher.got)
++	}
++}
++
++func TestAccessTokenRotatesAnExpiredPair(t *testing.T) {
++	store := &memoryStore{pair: TokenPair{Access: "old", Refresh: "r1", Expiry: tokenTestNow.Add(-time.Minute)}}
++	fresh := TokenPair{Access: "new", Refresh: "r2", Expiry: tokenTestNow.Add(24 * time.Hour)}
++	refresher := &fakeRefresher{pair: fresh}
++
++	token, err := newTestTokens(store, refresher).AccessToken(t.Context())
++
++	if err != nil || token != "new" {
++		t.Fatalf("token = %q, err = %v; want the new token", token, err)
++	}
++	if !slices.Equal(refresher.got, []string{"r1"}) || store.pair != fresh {
++		t.Errorf("refreshed with %v, stored %+v; want r1 refreshed and the new pair stored", refresher.got, store.pair)
++	}
++	if !slices.Equal(store.calls, []string{"load", "delete", "save"}) {
++		t.Errorf("store calls = %v", store.calls)
++	}
++}
++
++func TestAccessTokenReportsAFailedRefresh(t *testing.T) {
++	refused := errors.New("refresh refused")
++	store := &memoryStore{pair: TokenPair{Refresh: "r1", Expiry: tokenTestNow.Add(-time.Minute)}}
++
++	_, err := newTestTokens(store, &fakeRefresher{err: refused}).AccessToken(t.Context())
++
++	if !errors.Is(err, refused) {
++		t.Errorf("err = %v, want it to wrap %v", err, refused)
++	}
++}

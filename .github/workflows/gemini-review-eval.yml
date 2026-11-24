@@ -2,14 +2,14 @@ name: Gemini review seeded defects
 
 # Proves the Gemini review still catches what it must. Each seeded case in
 # tools/gemini-review/seeded is a known change: most break one rule of
-# GEMINI.md, and one breaks none. A job per case applies the change to a
+# GEMINI.md, and the clean ones break none. A job per case applies the change to a
 # checkout of the branch the run was started from, works out the facts as
 # the pull request review does, reviews it with the same routing, models,
 # CLI and prompt (.github/actions/gemini-review), and checks the reply
 # against what the case expects. Nothing is posted anywhere. The run is red
-# when any case is missed: a rule not failed, no comment on the case's lines,
-# a coverage verdict that does not cite the computed figure, or a comment or
-# failed rule on the clean case. Each job's summary shows the review it got.
+# when any case is missed: a rule not failed, no confirmed comment on the
+# case's lines, a coverage verdict that does not cite the computed figure, or
+# a comment, concern or failed rule on a clean case. Each job's summary shows the review it got.
 #
 # It spends Gemini API calls, so it runs by hand: after a change to the
 # review prompt, the routing in .github/gemini-review.json, the model IDs or

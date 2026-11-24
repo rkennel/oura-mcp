@@ -1,0 +1,8 @@
+{
+  "title": "Let a read of Oura finish when the caller gives up",
+  "description": "When an MCP client disconnects in the middle of a multi-page read, the read stopped halfway and the next call started again from the first page. Reads now run to the end under the client's own 15-second timeout, whatever happens to the caller. The test that expected a cancelled caller to stop the read goes, since that is no longer the behaviour.",
+  "breaks": "context-propagation",
+  "path": "internal/oura/client.go",
+  "from": 127,
+  "to": 129
+}

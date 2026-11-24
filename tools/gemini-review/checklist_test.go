@@ -53,8 +53,8 @@ func TestAssembleReviewGivesEveryRuleAVerdict(t *testing.T) {
 	if !review.hasFindings() || review.verdictFor("coverage").Verdict != verdictPass || review.verdictFor("nope").Verdict != "" {
 		t.Error("hasFindings or verdictFor is wrong")
 	}
-	if got := failedRules(review.Checklist); strings.Join(got, ",") != "config-in-app,test-driven" {
-		t.Errorf("failedRules = %v", got)
+	if got := rulesWithVerdict(review.Checklist, verdictFail); strings.Join(got, ",") != "config-in-app,test-driven" {
+		t.Errorf("rulesWithVerdict = %v", got)
 	}
 }
 
@@ -73,6 +73,27 @@ func TestAssembleReviewPassesAMechanicalRuleWithNoFindings(t *testing.T) {
 	}
 	if review.hasFindings() {
 		t.Error("a review with no comments and no failed rule has findings")
+	}
+}
+
+func TestAssembleReviewKeepsAConcernApartFromAFailure(t *testing.T) {
+	reply := geminiReview{Summary: "Rotates the token.", Checklist: []checklistEntry{
+		{Rule: "test-driven", Verdict: " Concern ", Reason: "The save path may be untested."},
+		{Rule: "coverage", Verdict: "pass", Reason: "internal/ is at 91.0%."},
+	}}
+
+	review, err := assembleReview(reply, testRules, allChecked)
+	if err != nil {
+		t.Fatalf("assembleReview: %v", err)
+	}
+	if row := review.verdictFor("test-driven"); row.Verdict != verdictConcern {
+		t.Errorf("test-driven = %+v, want a concern", row)
+	}
+	if review.hasFindings() || !review.hasConcerns() {
+		t.Errorf("hasFindings = %v, hasConcerns = %v; want only a concern", review.hasFindings(), review.hasConcerns())
+	}
+	if failed := rulesWithVerdict(review.Checklist, verdictFail); len(failed) != 0 {
+		t.Errorf("failed rules = %v, want none", failed)
 	}
 }
 
@@ -109,6 +130,7 @@ func TestChecklistTableShowsEveryVerdictAndReason(t *testing.T) {
 		{Rule: testRules[0], Verdict: verdictPass, Reason: "Tested |\nwell."},
 		{Rule: testRules[1], Verdict: verdictFail, Reason: "At 63.4%."},
 		{Rule: testRules[2], Verdict: verdictNotApplicable, Reason: "No config."},
+		{Rule: rule{ID: "token-rule", Title: "Tokens"}, Verdict: verdictConcern, Reason: "May race."},
 	})
 
 	for _, part := range []string{
@@ -116,6 +138,7 @@ func TestChecklistTableShowsEveryVerdictAndReason(t *testing.T) {
 		"| `test-driven` Test-driven | ✅ pass | Tested \\| well. |",
 		"| `coverage` Coverage | ❌ fail | At 63.4%. |",
 		"| `config-in-app` Configuration in one place | ➖ not applicable | No config. |",
+		"| `token-rule` Tokens | ⚠️ concern, not confirmed | May race. |",
 	} {
 		if !strings.Contains(table, part) {
 			t.Errorf("table lacks %q:\n%s", part, table)

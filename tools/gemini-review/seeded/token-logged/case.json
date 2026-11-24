@@ -1,0 +1,9 @@
+{
+  "title": "Log Oura requests at debug level",
+  "description": "When Oura answers 401 it is hard to tell which request caused it. The client now logs each request it sends to Oura at debug level, which is off in production unless switched on. Behaviour is otherwise unchanged and the client's tests pass.",
+  "breaks": "oura-data-private",
+  "path": "internal/oura/client.go",
+  "from": 192,
+  "to": 192,
+  "min_severity": "high"
+}

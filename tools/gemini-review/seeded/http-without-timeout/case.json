@@ -1,0 +1,8 @@
+{
+  "title": "Add a check that Oura is reachable",
+  "description": "Adds oura.Reachable, which sends a HEAD request to the Oura API and treats any answer below 500 as up. A later readiness check will use it to tell a network problem from a token problem. Unit tests cover an answer, an outage and an address that cannot be used.",
+  "breaks": "outbound-http",
+  "path": "internal/oura/reachable.go",
+  "from": 13,
+  "to": 17
+}

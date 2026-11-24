@@ -1,0 +1,70 @@
+diff --git a/internal/oura/days.go b/internal/oura/days.go
+index 35d4264..e3919ae 100644
+--- a/internal/oura/days.go
++++ b/internal/oura/days.go
+@@ -2,6 +2,7 @@ package oura
+ 
+ import (
+ 	"errors"
++	"fmt"
+ 	"time"
+ )
+ 
+@@ -28,6 +29,24 @@ func NewDayRange(first, last time.Time) (DayRange, error) {
+ 	return days, nil
+ }
+ 
++// ParseDayRange returns the days from first to last, both in Oura's
++// YYYY-MM-DD form, for the MCP tool that takes its dates as text.
++func ParseDayRange(first, last string) DayRange {
++	start, err := time.Parse(dayLayout, first)
++	if err != nil {
++		panic(fmt.Sprintf("oura: first day %q is not YYYY-MM-DD", first))
++	}
++	end, err := time.Parse(dayLayout, last)
++	if err != nil {
++		panic(fmt.Sprintf("oura: last day %q is not YYYY-MM-DD", last))
++	}
++	days, err := NewDayRange(start, end)
++	if err != nil {
++		panic(err)
++	}
++	return days
++}
++
+ // Days returns each day in the range, in order, in Oura's YYYY-MM-DD form.
+ func (r DayRange) Days() []string {
+ 	var days []string
+diff --git a/internal/oura/days_test.go b/internal/oura/days_test.go
+index a5972e2..dda14cc 100644
+--- a/internal/oura/days_test.go
++++ b/internal/oura/days_test.go
+@@ -103,3 +103,28 @@ func TestDayRangeQueriesADayEitherSide(t *testing.T) {
+ 		t.Errorf("queryBounds() = %s, %s, want 2026-10-31, 2026-11-04", start, end)
+ 	}
+ }
++
++func TestParseDayRangeReadsOurasDayForm(t *testing.T) {
++	days := ParseDayRange("2026-11-01", "2026-11-03")
++
++	if got := days.Days(); !slices.Equal(got, []string{"2026-11-01", "2026-11-02", "2026-11-03"}) {
++		t.Errorf("days = %v", got)
++	}
++}
++
++func TestParseDayRangePanicsOnDaysItCannotUse(t *testing.T) {
++	for name, pair := range map[string][2]string{
++		"bad first": {"11/01/2026", "2026-11-03"},
++		"bad last":  {"2026-11-01", "soon"},
++		"reversed":  {"2026-11-03", "2026-11-01"},
++	} {
++		t.Run(name, func(t *testing.T) {
++			defer func() {
++				if recover() == nil {
++					t.Error("ParseDayRange did not panic")
++				}
++			}()
++			ParseDayRange(pair[0], pair[1])
++		})
++	}
++}

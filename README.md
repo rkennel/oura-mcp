@@ -281,22 +281,41 @@ test-driven rules rather than estimate them. A failing stage does not stop
 the review: it is a fact for it. The end-to-end tests are left to CI.
 
 Every rule in `GEMINI.md` has a stable ID, such as `constant-time-compare`.
-Gemini must give each rule a verdict (pass, fail or not applicable) with a
-one-line reason; a reply that leaves a rule out fails the run and posts
-nothing. Rules marked "Checked by `scripts/check-standards.sh`" are
+Besides testing, structure and security basics, the rules cover where this
+service is most likely to go wrong: contexts, outbound HTTP, goroutines,
+error handling, how Oura's failures reach the MCP client, and keeping Oura's
+tokens and health data private and its single-use refresh token safe. Rules
+about code that does not exist yet, such as token storage, are judged not
+applicable until a change touches it.
+
+Gemini must give each rule a verdict (pass, fail, concern or not
+applicable) with a one-line reason; a reply that leaves a rule out fails the
+run and posts nothing. Rules marked "Checked by `scripts/check-standards.sh`" are
 mechanical: the script decides them, the same way in CI and in the review,
 and its findings are posted as line comments with the review. The review
 ends with the checklist as a table, and says "No issues found." only when no
 rule failed and nothing was commented on.
+
+A problem Gemini finds plausible but cannot prove is raised as a
+**concern** rather than dropped: a comment labelled `[CONCERN]` and
+"Not confirmed", or a rule's verdict "concern, not confirmed". Confirmed
+comments carry a severity of critical, high, medium or low, and a breach of
+a security rule is critical or high. A review whose only findings are
+concerns opens with "No confirmed issues." so a doubt is not read as a
+defect.
 
 ### Proving the review catches defects
 
 `.github/workflows/gemini-review-eval.yml` reviews each case in
 `tools/gemini-review/seeded` with the same routing, models, CLI and prompt as
 a pull request, posts nothing, and fails if the review missed what the case
-expects: the broken rule failed, a comment on the lines that break it, the
-computed coverage cited where the case is about coverage, and no comment or
-failed rule on the clean case. Each job's summary shows the review it got.
+expects: the broken rule failed, a confirmed comment on the lines that break
+it (a concern does not count, and a case may ask for a least severity, such
+as high for a leaked token), the computed coverage cited where the case is
+about coverage, and no comment, concern or failed rule on the clean cases.
+There is a case for each rule Gemini judges that the stories name, and two
+clean cases: a documentation change, and an Oura client change that follows
+every rule. Each job's summary shows the review it got.
 
 It spends Gemini API calls, so it runs by hand. Run it **after changing the
 review prompt (`tools/gemini-review/prompt.go`), the routing or model IDs in
@@ -307,7 +326,8 @@ naming one case. GitHub offers the button only once the workflow is on
 `main`.
 
 A case is a folder with `case.json` (the title and description Gemini sees,
-the rule it breaks, and the file and lines a comment must land on) and
+the rule it breaks, the file and lines a comment must land on, and
+optionally `min_severity`, the least severity that comment may have) and
 `change.diff`, a patch against `main`. `scripts/tools-test.sh` fails when a
 case names a rule `GEMINI.md` no longer has, expects lines its change does
 not show, or has a patch that no longer applies; regenerate the patch when

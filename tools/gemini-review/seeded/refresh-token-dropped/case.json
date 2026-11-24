@@ -1,0 +1,8 @@
+{
+  "title": "Renew the Oura access token when it expires",
+  "description": "Adds RotatingTokens, a TokenSource that loads the token pair from a store and, once the access token has expired, exchanges the refresh token for a new pair and stores it. The store and Oura's token endpoint are interfaces, so a later story can back them with Secret Manager and the real endpoint. Unit tests cover an unexpired token, a rotation and a failed refresh.",
+  "breaks": "refresh-token-rotation",
+  "path": "internal/oura/tokens.go",
+  "from": 60,
+  "to": 62
+}

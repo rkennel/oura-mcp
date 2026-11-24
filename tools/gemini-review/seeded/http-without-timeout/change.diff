@@ -1,0 +1,76 @@
+diff --git a/internal/oura/reachable.go b/internal/oura/reachable.go
+new file mode 100644
+index 0000000..f05de6f
+--- /dev/null
++++ b/internal/oura/reachable.go
+@@ -0,0 +1,27 @@
++package oura
++
++import (
++	"context"
++	"fmt"
++	"net/http"
++)
++
++// Reachable reports whether Oura answers at baseURL, so that a readiness
++// check can tell a network problem from a token problem. Any answer below
++// 500 means Oura is up, even one that refuses the request.
++func Reachable(ctx context.Context, baseURL string) error {
++	request, err := http.NewRequestWithContext(ctx, http.MethodHead, baseURL, nil)
++	if err != nil {
++		return fmt.Errorf("oura reachable: build the request: %w", err)
++	}
++	response, err := http.DefaultClient.Do(request)
++	if err != nil {
++		return fmt.Errorf("oura reachable: send the request: %w", err)
++	}
++	defer func() { _ = response.Body.Close() }()
++
++	if response.StatusCode >= http.StatusInternalServerError {
++		return fmt.Errorf("oura reachable: HTTP %d", response.StatusCode)
++	}
++	return nil
++}
+diff --git a/internal/oura/reachable_test.go b/internal/oura/reachable_test.go
+new file mode 100644
+index 0000000..b70eafa
+--- /dev/null
++++ b/internal/oura/reachable_test.go
+@@ -0,0 +1,37 @@
++package oura
++
++import (
++	"net/http"
++	"net/http/httptest"
++	"testing"
++)
++
++func TestReachableAcceptsAnyAnswerBelow500(t *testing.T) {
++	for _, status := range []int{http.StatusOK, http.StatusUnauthorized, http.StatusNotFound} {
++		oura := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
++			w.WriteHeader(status)
++		}))
++
++		if err := Reachable(t.Context(), oura.URL); err != nil {
++			t.Errorf("status %d: Reachable = %v, want nil", status, err)
++		}
++		oura.Close()
++	}
++}
++
++func TestReachableReportsAnOuraOutage(t *testing.T) {
++	oura := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
++		w.WriteHeader(http.StatusServiceUnavailable)
++	}))
++	defer oura.Close()
++
++	if err := Reachable(t.Context(), oura.URL); err == nil {
++		t.Error("Reachable = nil for a 503, want an error")
++	}
++}
++
++func TestReachableReportsAnAddressItCannotUse(t *testing.T) {
++	if err := Reachable(t.Context(), "http://bad host"); err == nil {
++		t.Error("Reachable = nil for an unusable address, want an error")
++	}
++}

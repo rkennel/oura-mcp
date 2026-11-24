@@ -11,10 +11,13 @@ import (
 
 const seededDir = "seeded"
 
-// The story asks for a seeded case of at least these rules, and a clean one.
+// The stories ask for a seeded case of at least these rules, and a clean
+// one: KAN-19 for the first rules, KAN-20 for the Go and Oura rules.
 var requiredSeededRules = []string{
 	"constant-time-compare", "no-secret-leaks", "idiomatic-go", "api-explore-file",
 	"settings-documented", "test-driven", "coverage",
+	"context-propagation", "outbound-http", "goroutine-lifecycle", "error-handling",
+	"oura-failures", "oura-data-private", "refresh-token-rotation",
 }
 
 // Every seeded case in the repository must name a rule of GEMINI.md and
@@ -76,11 +79,14 @@ func checkCaseLines(t *testing.T, c seededCase) {
 
 func TestLoadCaseRejectsIncompleteCases(t *testing.T) {
 	for name, content := range map[string]string{
-		"not JSON":          "{",
-		"no title":          `{"description": "d", "breaks": "x"}`,
-		"lines, no path":    `{"title": "t", "description": "d", "breaks": "x", "from": 3, "to": 3}`,
-		"lines reversed":    `{"title": "t", "description": "d", "breaks": "x", "path": "a.go", "from": 5, "to": 3}`,
-		"clean with a path": `{"title": "t", "description": "d", "path": "a.go", "from": 1, "to": 1}`,
+		"not JSON":           "{",
+		"no title":           `{"description": "d", "breaks": "x"}`,
+		"lines, no path":     `{"title": "t", "description": "d", "breaks": "x", "from": 3, "to": 3}`,
+		"lines reversed":     `{"title": "t", "description": "d", "breaks": "x", "path": "a.go", "from": 5, "to": 3}`,
+		"clean with a path":  `{"title": "t", "description": "d", "path": "a.go", "from": 1, "to": 1}`,
+		"severity, no lines": `{"title": "t", "description": "d", "breaks": "x", "min_severity": "high"}`,
+		"unknown severity":   `{"title": "t", "description": "d", "breaks": "x", "path": "a.go", "from": 1, "to": 1, "min_severity": "severe"}`,
+		"concern severity":   `{"title": "t", "description": "d", "breaks": "x", "path": "a.go", "from": 1, "to": 1, "min_severity": "concern"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := writeTree(t, map[string]string{caseFile: content})
@@ -233,7 +239,14 @@ func TestEvaluateFailsAReviewThatMissedTheDefect(t *testing.T) {
 		"rule passed": {"gemini-rule", replyWith(`{"path": "new.go", "line": 3, "body": "x"}`, "pass", "Fine."),
 			`did not fail gemini-rule (verdict "pass")`},
 		"comment on the wrong line": {"gemini-rule", replyWith(`{"path": "new.go", "line": 4, "body": "x"}`, "fail", "x"),
-			"no comment on new.go lines 2 to 3"},
+			"no confirmed comment on new.go lines 2 to 3"},
+		"only a concern on the rule": {"gemini-rule", replyWith(`{"path": "new.go", "line": 3, "body": "x"}`, "concern", "Maybe."),
+			`did not fail gemini-rule (verdict "concern")`},
+		"only a concern on the line": {"gemini-rule", replyWith(`{"path": "new.go", "line": 3, "severity": "concern", "body": "x"}`, "fail", "x"),
+			"no confirmed comment on new.go lines 2 to 3"},
+		"clean change with a concern comment": {"", replyWith(`{"path": "new.go", "line": 1, "severity": "concern", "body": "Maybe."}`, "pass", "Fine."),
+			"the review made 1 comments"},
+		"clean change with a concern verdict": {"", replyWith("", "concern", "Maybe."), "raised a concern on gemini-rule"},
 		"clean change commented on": {"", replyWith(`{"path": "new.go", "line": 1, "body": "Nit."}`, "pass", "Fine."),
 			"the review made 1 comments"},
 		"clean change failed": {"", replyWith("", "fail", "Why not."), "the review failed gemini-rule"},
@@ -248,6 +261,26 @@ func TestEvaluateFailsAReviewThatMissedTheDefect(t *testing.T) {
 				t.Errorf("report = %q, want it marked missed", out)
 			}
 		})
+	}
+}
+
+func TestEvaluateChecksTheCommentIsAsSevereAsTheCaseAsks(t *testing.T) {
+	dir := seededReviewDir(t, "gemini-rule", nil)
+	rewriteCase(t, dir, func(c *seededCase) { c.MinSeverity = severityHigh })
+	comment := func(severity string) string {
+		return `{"path": "new.go", "line": 3, "severity": "` + severity + `", "body": "Leaks the token."}`
+	}
+
+	for _, enough := range []string{"high", "critical"} {
+		if _, err := evaluate(t, dir, replyWith(comment(enough), "fail", "Logged.")); err != nil {
+			t.Errorf("evaluate with a %s comment: %v", enough, err)
+		}
+	}
+	for _, tooLow := range []string{"medium", "low", "concern", ""} {
+		_, err := evaluate(t, dir, replyWith(comment(tooLow), "fail", "Logged."))
+		if err == nil || !strings.Contains(err.Error(), "no confirmed comment of high or higher severity on new.go lines 2 to 3") {
+			t.Errorf("evaluate with a %q comment: err = %v", tooLow, err)
+		}
 	}
 }
 

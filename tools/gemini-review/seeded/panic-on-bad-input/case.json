@@ -1,0 +1,8 @@
+{
+  "title": "Read a day range from Oura's YYYY-MM-DD text",
+  "description": "Adds ParseDayRange, for the MCP tool in a later story that will take its start and end dates as text from the client. Dates that are not YYYY-MM-DD, or a range that ends before it starts, are a programming error, so it panics on them. Unit tests cover a good range and each bad one.",
+  "breaks": "idiomatic-go",
+  "path": "internal/oura/days.go",
+  "from": 37,
+  "to": 45
+}
