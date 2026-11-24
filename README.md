@@ -13,7 +13,8 @@ and deployed as a container on Google Cloud Run.
 | `internal/mcpserver` | The MCP server: its name and version, its tools, and the HTTP transport. |
 | `api-explore/` | `.http` files that show how to call each API, for the REST Client extension. |
 | `e2e/` | End-to-end tests and their Docker Compose environment. |
-| `scripts/` | The CI stages, runnable locally, and the scripts that run the server on your machine. |
+| `scripts/` | The CI stages, runnable locally, the scripts that run the server on your machine, and the deploy. |
+| `docs/` | Guides, such as the Google Cloud setup and deploy. |
 | `tools/gemini-review` | Fetches a pull request for the Gemini review, picks the model, and posts Gemini's reply. Its own Go module. |
 | `Dockerfile` | The production image. |
 
@@ -33,12 +34,14 @@ minute or two. `govulncheck` needs to reach https://vuln.go.dev.
 |---|---|
 | `scripts/static-analysis.sh` | `gofmt` check, `go vet`, a `go.mod` tidiness check, `golangci-lint` and `govulncheck` |
 | `scripts/unit-test.sh` | Unit tests with the race detector, failing below 85% coverage |
+| `scripts/deploy-test.sh` | Tests `scripts/deploy.sh` against stand-ins for `gcloud`, `docker` and `curl` |
 | `scripts/e2e-test.sh` | Builds the production image, runs it, and runs the end-to-end tests against it |
 | `scripts/server-scripts-test.sh` | Tests the start and stop scripts below against a throwaway copy of the repository |
 | `scripts/local-ci.sh` | All of the above in order, stopping at the first failure |
 | `scripts/start-server.sh` | Builds the server and starts it in the background with the settings in `.env` |
 | `scripts/stop-server.sh` | Stops the server that `start-server.sh` started |
 | `scripts/run-server.sh` | Runs the server in the foreground with the settings in `.env` |
+| `scripts/deploy.sh` | Builds the image from the current commit and deploys it to Cloud Run (see below); `--dry-run` only prints the commands |
 
 Set `KEEP_E2E_UP=1` to leave the end-to-end container running after the
 tests, for debugging.
@@ -143,6 +146,22 @@ The end-to-end script uses `CONNECTOR_API_KEY` from your shell or `.env`,
 or generates a throwaway key for the run when neither sets one. Use your own
 key to call a server you kept up with `KEEP_E2E_UP=1`.
 
+## Deploying to Cloud Run
+
+The server runs on Cloud Run in the `kennelfitness` Google Cloud project, in
+`us-central1`. [docs/gcp-setup.md](docs/gcp-setup.md) has the one-time
+setup (APIs, image repository, service account, the key in Secret Manager,
+the budget alert), the deploy, and how to add the connector in Claude.
+After the setup, each deploy is:
+
+```sh
+scripts/deploy.sh
+```
+
+It deploys the committed code only, and finishes by checking that the
+deployed `/health` answers and that `/mcp` refuses a request without the
+key.
+
 ## Testing approach
 
 - **Unit tests** sit beside the code as `_test.go` files and test one unit in
@@ -155,7 +174,8 @@ key to call a server you kept up with `KEEP_E2E_UP=1`.
 
 Every pull request runs three stages, each only if the previous one passes:
 static analysis, unit tests with the coverage gate, then end-to-end tests.
-The end-to-end stage also tests the local start and stop scripts.
+The unit test stage also tests the deploy script, and the end-to-end stage
+the local start and stop scripts.
 
 Versions are pinned so a run today matches a run next month: the Go
 toolchain in `go.mod`, the linters in `scripts/static-analysis.sh`, the base
@@ -211,5 +231,5 @@ workflow, the review job is skipped and that job's summary says why.
 
 The server answers `GET /health`, serves MCP at `/mcp` with a placeholder
 `ping` tool, and requires the API key on everything except the health
-check. Oura access arrives in later pull requests; see the KAN project in
+check. `scripts/deploy.sh` deploys it to Cloud Run. Oura access arrives in later pull requests; see the KAN project in
 Jira.
